@@ -4,30 +4,26 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::path::Path;
 
+mod html;
+
+// Default hard-coded storage directory.
+const DIR: &str = "drop";
+
 #[derive(Deserialize)]
 struct Clipboard {
     text: String,
 }
 
-// TODO: Fix this mess
-const HEADER: &str = r#"<!DOCTYPE html><html><head><meta name=viewport content="width=device-width, initial-scale=1.0"><meta name=keywords content="actix-drop"><meta name=author content=@artnoi><meta charset=UTF-8><link href=https://artnoi.com/style.css rel=stylesheet><title>actix-drop</title></head><body><h1><a href="/">actix-drop</a></h1>"#;
-const FOOTER: &str = r#"<footer><p><a href="https://github.com/artnoi43/actix-drop">Contribute on Github</a></p></footer></body></html>"#;
-const STYLE: &str = r#"html{overflow-y:scroll;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;padding:1.5em}body{background:#000;margin:auto;max-width:80em;line-height:1.5em;font-size:18px;white-space:pre-wrap;word-wrap:break-word;color:#c0ca8e}pre>code{background:#161821;display:block;padding:10px 15px}footer p{font-family:Times;font-size:small;text-align:left}"#;
-
 // Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
-    HttpResponse::Ok().content_type("text/html").body(format!(
-        r#"
-                {}
-                <form action="/drop" method="post">
-                <textarea id="textbox" name="text" rows="4" cols="50"></textarea>
-                <br>
-                <button type="submit">Submit Clipboard</button>
-                </form>
-                {}
-            "#,
-        HEADER, FOOTER,
-    ))
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(html::wrap_html(
+            r#"<form action="/drop" method="post">
+            <textarea id="textbox" name="text" rows="5" cols="32"></textarea><br>
+            <button type="submit">Send</button>
+            </form>"#,
+        ))
 }
 
 // Receive Clipboard from HTML form sent by get_index, and save text to file.
@@ -38,7 +34,7 @@ async fn post_drop(mut form: web::Form<Clipboard>) -> HttpResponse {
     if form.text.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
-            .body("<p>error: blank clipboard sent</p>");
+            .body(html::wrap_html("<p>Error: blank clipboard sent</p>"));
     }
 
     // hash is hex-coded string of SHA2 hash of form.text.
@@ -52,14 +48,7 @@ async fn post_drop(mut form: web::Form<Clipboard>) -> HttpResponse {
 
         return HttpResponse::InternalServerError()
             .content_type("text/html")
-            .body(format!(
-                r"
-            {}
-            <p>error: cannot save clipboard</p>
-            {}
-            ",
-                HEADER, FOOTER,
-            ));
+            .body(html::wrap_html("<p>Error: cannot save clipboard</p>"));
     }
 
     let mut dotdot: &str = "";
@@ -68,18 +57,15 @@ async fn post_drop(mut form: web::Form<Clipboard>) -> HttpResponse {
         dotdot = "..";
     }
 
-    let response = format!(
-        r#"{0}
-        <p>Clipboard <code>{1}</code>{2} with hash <code>{3}</code> created</p>
-        <p>The clipboard will be available at path <a href="/drop/{3}"><code>/drop/{3}</code></a></p>
-        {4}
-"#,
-        HEADER, form.text, dotdot, hash, FOOTER,
+    let body = format!(
+        r#"<p>Clipboard <code>{0}</code>{1} with hash <code>{2}</code> created</p>
+        <p>The clipboard is now available at path <a href="/drop/{2}"><code>/drop/{2}</code></a></p>"#,
+        form.text, dotdot, hash,
     );
 
     HttpResponse::Created()
         .content_type("text/html")
-        .body(response)
+        .body(html::wrap_html(&body))
 }
 
 // Retrive the clipboard based on its ID as per post_drop.
@@ -87,11 +73,12 @@ async fn post_drop(mut form: web::Form<Clipboard>) -> HttpResponse {
 async fn get_drop(id: web::Path<String>) -> HttpResponse {
     match read_clipboard(id.clone().into()) {
         Err(err) => {
-            eprintln!("read_file error: {}", err);
+            eprintln!("read_clipboard error: {}", err.to_string());
 
+            let body = format!("Error: no such clipboard: <code>{}</code>", id);
             return HttpResponse::NotFound()
                 .content_type("text/html")
-                .body(format!("error: no such clipboard: {}", id));
+                .body(html::wrap_html(&body));
         }
 
         Ok(clipboard) => {
@@ -99,41 +86,39 @@ async fn get_drop(id: web::Path<String>) -> HttpResponse {
             if text.is_err() {
                 return HttpResponse::InternalServerError()
                     .content_type("text/html")
-                    .body("error: clipboard is non UTF-8");
+                    .body(html::wrap_html("Error: clipboard is non UTF-8"));
             }
 
             let body = format!(
-                r#"{}
-                <p>Clipboard for <code>{}</code>:</p>
-                <pre><code>{}</code></pre>
-                {}
-
-            "#,
-                HEADER,
+                r#"<p>Clipboard <code>{}</code>:</p>
+                <pre><code>{}</code></pre>"#,
                 id,
                 text.unwrap(),
-                FOOTER,
             );
 
-            return HttpResponse::Ok().content_type("text/html").body(body);
+            return HttpResponse::Ok()
+                .content_type("text/html")
+                .body(html::wrap_html(&body));
         }
     }
 }
 
 async fn serve_css() -> HttpResponse {
-    HttpResponse::Ok().content_type("text/css").body(STYLE)
+    HttpResponse::Ok()
+        .content_type("text/css")
+        .body(html::STYLE)
 }
 
 fn write_clipboard<S>(name: S, content: &[u8]) -> std::io::Result<()>
 where
     S: AsRef<Path>,
 {
-    let path = Path::new("drop/").join(name.as_ref());
+    let path = Path::new(DIR).join(name.as_ref());
     std::fs::write(path, content)
 }
 
 fn read_clipboard(id: web::Path<String>) -> std::io::Result<Vec<u8>> {
-    let path = Path::new("drop/").join(id.as_ref());
+    let path = Path::new(DIR).join(id.as_ref());
     std::fs::read(path)
 }
 
@@ -150,14 +135,13 @@ fn check_dir(dst: &str) -> std::io::Result<bool> {
 
 #[actix_web::main]
 async fn main() {
-    // Ensure that ./drop is a directory
-    let check_result = check_dir("drop");
-    match check_result {
-        Ok(false) => create_dir("drop").expect("failed to create ./drop/"),
+    // Ensure that ./${DIR} is a directory
+    match check_dir(DIR) {
+        Ok(false) => create_dir(DIR).expect("failed to create storage directory"),
 
         Err(err) => match err.kind() {
             std::io::ErrorKind::NotFound => {
-                create_dir("drop").expect("failed to create ./drop/");
+                create_dir(DIR).expect("failed to create storage directory");
             }
 
             _ => panic!("failed to get working directory information"),
@@ -175,7 +159,7 @@ async fn main() {
             .service(get_drop)
     });
 
-    println!("Serving on http://localhost:3000...");
+    println!("actix-drop listening on http://localhost:3000...");
     server
         .bind("127.0.0.1:3000")
         .expect("error binding server to address")
