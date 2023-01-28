@@ -20,7 +20,8 @@ async fn landing_page() -> HttpResponse {
         r#"
                 {}
                 <form action="/drop" method="post">
-                <input type="text" name="text"/>
+                <textarea id="textbox" name="text" rows="4" cols="50"></textarea>
+                <br>
                 <button type="submit">Submit Clipboard</button>
                 </form>
                 {}
