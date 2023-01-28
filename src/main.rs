@@ -62,14 +62,19 @@ async fn post_drop(mut form: web::Form<Clipboard>) -> HttpResponse {
             ));
     }
 
-    form.text.truncate(10);
+    let mut dotdot: &str = "";
+    if form.text.len() > 10 {
+        form.text.truncate(10);
+        dotdot = "..";
+    }
+
     let response = format!(
         r#"{0}
-        <p>Clipboard {1} with hash <code>{2}</code> created</p>
-        <p>The clipboard will be available at path <a href="/drop/{2}"><code>/drop/{2}</code></a></p>
-        {3}
+        <p>Clipboard <code>{1}</code>{2} with hash <code>{3}</code> created</p>
+        <p>The clipboard will be available at path <a href="/drop/{3}"><code>/drop/{3}</code></a></p>
+        {4}
 "#,
-        HEADER, form.text, hash, FOOTER,
+        HEADER, form.text, dotdot, hash, FOOTER,
     );
 
     HttpResponse::Created()
