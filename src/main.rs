@@ -137,15 +137,18 @@ fn check_dir(dst: &str) -> std::io::Result<bool> {
 async fn main() {
     // Ensure that ./${DIR} is a directory
     match check_dir(DIR) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            create_dir(DIR).expect("failed to create storage directory");
+        }
+
+        Err(err) => {
+            panic!(
+                "failed to get working directory information: {}",
+                err.to_string()
+            );
+        }
+
         Ok(false) => create_dir(DIR).expect("failed to create storage directory"),
-
-        Err(err) => match err.kind() {
-            std::io::ErrorKind::NotFound => {
-                create_dir(DIR).expect("failed to create storage directory");
-            }
-
-            _ => panic!("failed to get working directory information"),
-        },
 
         _ => {}
     }
