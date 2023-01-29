@@ -142,10 +142,7 @@ async fn main() {
         }
 
         Err(err) => {
-            panic!(
-                "failed to get working directory information: {}",
-                err.to_string()
-            );
+            panic!("bad directory: {}", err.to_string());
         }
 
         Ok(false) => create_dir(DIR).expect("failed to create storage directory"),
