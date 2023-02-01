@@ -36,39 +36,34 @@ where
 {
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Mem(t) => write!(formatter, "mem {}", t),
-            Self::Persist(t) => write!(formatter, "persist {}", t),
+            Self::Mem(_) => write!(formatter, "mem"),
+            Self::Persist(_) => write!(formatter, "persist"),
         }
     }
 }
 
 // Only support string for now.
 // Maybe changed to enum to support multiple type of clipboards such as bytes
-enum Clipboard<T>
-where
-    T: IntoIterator,
-{
-    Bytes(T),
+#[derive(Deserialize)]
+enum Clipboard {
+    Bytes(Vec<u8>),
     Text(String),
 }
 
-impl<'a, T> IntoIterator for Clipboard<T>
-where
-    T: IntoIterator,
-{
-    type IntoIter = T;
-    type Item = <T as IntoIterator>::Item;
-    fn into_iter(&mut self) -> Self::Item {
+impl IntoIterator for Clipboard {
+    type Item = u8;
+    type IntoIter = Box<dyn Iterator<Item = u8>>;
+    fn into_iter(self) -> Self::IntoIter {
         match self {
-            Self::Bytes(bytes) => {}
-            Self::Text(text) => text.into_iter(),
+            Self::Bytes(bytes) => Box::new(bytes.into_iter()),
+            _ => panic!(),
         }
     }
 }
 
 #[derive(Deserialize)]
 struct ClipboardRequest {
-    text: Store<Clipboard<String>>,
+    data: Store<Clipboard>,
 }
 
 // Return HTML form for entering text to be saved
@@ -84,8 +79,7 @@ async fn landing_page() -> HttpResponse {
             </select>
             <button type="submit">Send</button>
             </form>"#,
-            Store::Mem,
-            Store::Persist,
+            "mem", "persist",
         )))
 }
 
@@ -97,8 +91,24 @@ async fn landing_page() -> HttpResponse {
 async fn post_drop(
     req: web::Either<web::Form<ClipboardRequest>, web::Json<ClipboardRequest>>,
 ) -> HttpResponse {
-    let mut form = req.into_inner();
-    if form.text.is_empty() {
+    let form = req.into_inner();
+    let data: &[u8];
+
+    match form.data {
+        Store::Persist(Clipboard::Text(ref text)) => {
+            data = text.as_ref();
+        }
+
+        _ => {
+            return HttpResponse::InternalServerError()
+                .content_type("text/html")
+                .body(html::wrap_html(
+                    "<p>Error: in-memory store or bytes clipboard not implemented</p>",
+                ));
+        }
+    }
+
+    if data.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
             .body(html::wrap_html("<p>Error: blank clipboard sent</p>"));
@@ -107,12 +117,12 @@ async fn post_drop(
     // hash is hex-coded string of SHA2 hash of form.text.
     // hash will be truncated to string of length 4, and
     // the short stringa
-    let mut hash = format!("{:x}", Sha256::digest(&form.text));
+    let mut hash = format!("{:x}", Sha256::digest(data));
     hash.truncate(4);
 
-    match form.text {
+    match form.data {
         Store::Persist(_) => {
-            if let Err(err) = persist::write_clipboard_file(&hash, form.text.as_ref()) {
+            if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
 
                 return HttpResponse::InternalServerError()
@@ -130,16 +140,10 @@ async fn post_drop(
         }
     }
 
-    let mut dotdot: &str = "";
-    if form.text.len() > 10 {
-        form.text.truncate(10);
-        dotdot = "..";
-    }
-
     let body = format!(
-        r#"<p>Clipboard <code>{0}</code>{1} with hash <code>{2}</code> created</p>
-        <p>The clipboard is now available at path <a href="/drop/{2}"><code>/drop/{2}</code></a></p>"#,
-        form.text, dotdot, hash,
+        r#"<p>Clipboard with hash <code>{0}</code> created</p>
+        <p>The clipboard is now available at path <a href="/drop/{0}"><code>/drop/{0}</code></a></p>"#,
+        hash,
     );
 
     HttpResponse::Created()
