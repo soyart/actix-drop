@@ -10,7 +10,7 @@ mod persist;
 #[serde(rename_all = "lowercase")]
 enum Store<T>
 where
-    T: IntoIterator,
+    T: AsRef<[u8]>,
 {
     Mem(T),
     Persist(T),
@@ -18,7 +18,7 @@ where
 
 impl<T> std::ops::Deref for Store<T>
 where
-    T: IntoIterator,
+    T: AsRef<[u8]>,
 {
     type Target = T;
 
@@ -30,9 +30,21 @@ where
     }
 }
 
+impl<T> AsRef<[u8]> for Store<T>
+where
+    T: AsRef<[u8]>,
+{
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Self::Mem(t) => return t.as_ref(),
+            Self::Persist(t) => return t.as_ref(),
+        }
+    }
+}
+
 impl<T> std::fmt::Display for Store<T>
 where
-    T: std::fmt::Display + IntoIterator,
+    T: std::fmt::Display + AsRef<[u8]>,
 {
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -42,28 +54,13 @@ where
     }
 }
 
-// Only support string for now.
-// Maybe changed to enum to support multiple type of clipboards such as bytes
-#[derive(Deserialize)]
-enum Clipboard {
-    Bytes(Vec<u8>),
-    Text(String),
-}
+type Clipboard = Vec<u8>;
 
-impl IntoIterator for Clipboard {
-    type Item = u8;
-    type IntoIter = Box<dyn Iterator<Item = u8>>;
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            Self::Bytes(bytes) => Box::new(bytes.into_iter()),
-            _ => panic!(),
-        }
-    }
-}
-
+// TODO: new struct or manually implement Deserialize
 #[derive(Deserialize)]
 struct ClipboardRequest {
-    data: Store<Clipboard>,
+    data: String,
+    store: Store<Clipboard>,
 }
 
 // Return HTML form for entering text to be saved
@@ -72,8 +69,8 @@ async fn landing_page() -> HttpResponse {
         .content_type("text/html")
         .body(html::wrap_html(&format!(
             r#"<form action="/drop" method="post">
-            <textarea id="textbox" name="text" rows="5" cols="32"></textarea><br>
-            <select id="selection box" name="store_type">
+            <textarea id="textbox" name="data" rows="5" cols="32"></textarea><br>
+            <select id="selection box" name="store">
                 <option value="{}">In-memory database</option>
                 <option value="{}">Persist to file</option>
             </select>
@@ -92,11 +89,11 @@ async fn post_drop(
     req: web::Either<web::Form<ClipboardRequest>, web::Json<ClipboardRequest>>,
 ) -> HttpResponse {
     let form = req.into_inner();
-    let data: &[u8];
+    let data: Store<&[u8]>;
 
-    match form.data {
-        Store::Persist(Clipboard::Text(ref text)) => {
-            data = text.as_ref();
+    match form.store {
+        Store::Persist(_) => {
+            data = Store::Persist(form.data.as_ref());
         }
 
         _ => {
@@ -117,10 +114,11 @@ async fn post_drop(
     // hash is hex-coded string of SHA2 hash of form.text.
     // hash will be truncated to string of length 4, and
     // the short stringa
+    let data = &data;
     let mut hash = format!("{:x}", Sha256::digest(data));
     hash.truncate(4);
 
-    match form.data {
+    match form.store {
         Store::Persist(_) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
