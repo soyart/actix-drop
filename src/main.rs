@@ -8,28 +8,67 @@ mod persist;
 // enum Store specifies which type of storage to use
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum Store {
-    Mem,
-    Persist,
+enum Store<T>
+where
+    T: IntoIterator,
+{
+    Mem(T),
+    Persist(T),
 }
 
-impl std::fmt::Display for Store {
+impl<T> std::ops::Deref for Store<T>
+where
+    T: IntoIterator,
+{
+    type Target = T;
+
+    fn deref(self: &Self) -> &Self::Target {
+        match self {
+            Self::Mem(t) => return &t,
+            Self::Persist(t) => return &t,
+        }
+    }
+}
+
+impl<T> std::fmt::Display for Store<T>
+where
+    T: std::fmt::Display + IntoIterator,
+{
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Mem => write!(formatter, "mem"),
-            Self::Persist => write!(formatter, "persist"),
+            Self::Mem(t) => write!(formatter, "mem {}", t),
+            Self::Persist(t) => write!(formatter, "persist {}", t),
         }
     }
 }
 
 // Only support string for now.
 // Maybe changed to enum to support multiple type of clipboards such as bytes
-type Clipboard = String;
+enum Clipboard<T>
+where
+    T: IntoIterator,
+{
+    Bytes(T),
+    Text(String),
+}
+
+impl<'a, T> IntoIterator for Clipboard<T>
+where
+    T: IntoIterator,
+{
+    type IntoIter = T;
+    type Item = <T as IntoIterator>::Item;
+    fn into_iter(&mut self) -> Self::Item {
+        match self {
+            Self::Bytes(bytes) => {}
+            Self::Text(text) => text.into_iter(),
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct ClipboardRequest {
-    text: Clipboard,
-    store_type: Store, // In-memory or persistent
+    text: Store<Clipboard<String>>,
 }
 
 // Return HTML form for entering text to be saved
@@ -71,8 +110,8 @@ async fn post_drop(
     let mut hash = format!("{:x}", Sha256::digest(&form.text));
     hash.truncate(4);
 
-    match form.store_type {
-        Store::Persist => {
+    match form.text {
+        Store::Persist(_) => {
             if let Err(err) = persist::write_clipboard_file(&hash, form.text.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
 
@@ -82,7 +121,7 @@ async fn post_drop(
             }
         }
 
-        Store::Mem => {
+        Store::Mem(_) => {
             return HttpResponse::InternalServerError()
                 .content_type("text/html")
                 .body(html::wrap_html(
