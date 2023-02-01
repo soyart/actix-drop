@@ -54,13 +54,10 @@ where
     }
 }
 
-type Clipboard = Vec<u8>;
-
 // TODO: new struct or manually implement Deserialize
 #[derive(Deserialize)]
 struct ClipboardRequest {
-    data: String,
-    store: Store<Clipboard>,
+    data: Store<Vec<u8>>,
 }
 
 // Return HTML form for entering text to be saved
@@ -91,7 +88,7 @@ async fn post_drop(
     let form = req.into_inner();
     let data: Store<&[u8]>;
 
-    match form.store {
+    match form.data {
         Store::Persist(_) => {
             data = Store::Persist(form.data.as_ref());
         }
@@ -118,7 +115,7 @@ async fn post_drop(
     let mut hash = format!("{:x}", Sha256::digest(data));
     hash.truncate(4);
 
-    match form.store {
+    match form.data {
         Store::Persist(_) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
