@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 mod html;
 mod persist;
 
+const MEM: &str = "MEM";
+const PERSIST: &str = "PERSIST";
+
 // enum Store specifies which type of storage to use
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,20 +47,47 @@ where
 
 impl<T> std::fmt::Display for Store<T>
 where
-    T: std::fmt::Display + AsRef<[u8]>,
+    T: AsRef<[u8]>,
 {
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Mem(_) => write!(formatter, "mem"),
-            Self::Persist(_) => write!(formatter, "persist"),
+        let key = match self {
+            Self::Persist(_) => PERSIST,
+            Self::Mem(_) => MEM,
+        };
+
+        let val = self.as_ref();
+        let s = std::str::from_utf8(val);
+
+        if let Ok(string) = s {
+            write!(formatter, r#""{}":"{}""#, key, string)
+        } else {
+            write!(formatter, r#""{}":"{:?}"#, key, val)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_display_store() {
+        use super::Store;
+        let mem_str = Store::Mem("foo");
+        assert_eq!(r#""MEM":"foo""#, format!("{}", mem_str));
+
+        let persist_bin = Store::Persist(vec![14, 16, 200]);
+        assert_eq!(r#""PERSIST":"[14, 16, 200]"#, format!("{}", persist_bin));
+
+        // Valid UTF-8 byte array should be formatted as string
+        let mem_str_vec = Store::Mem("foo".bytes().collect::<Vec<u8>>());
+        assert_eq!(r#""MEM":"foo""#, format!("{}", mem_str_vec));
     }
 }
 
 // TODO: new struct or manually implement Deserialize
 #[derive(Deserialize)]
 struct ClipboardRequest {
-    data: Store<Vec<u8>>,
+    data: String,
+    store: String,
 }
 
 // Return HTML form for entering text to be saved
@@ -73,7 +103,7 @@ async fn landing_page() -> HttpResponse {
             </select>
             <button type="submit">Send</button>
             </form>"#,
-            "mem", "persist",
+            MEM, PERSIST,
         )))
 }
 
@@ -82,23 +112,19 @@ async fn landing_page() -> HttpResponse {
 // will be used as filename as ID for the clipboard.
 // It can handle both HTML form and JSON request.
 #[post("/drop")]
-async fn post_drop(
+async fn post_drop<'a>(
     req: web::Either<web::Form<ClipboardRequest>, web::Json<ClipboardRequest>>,
 ) -> HttpResponse {
     let form = req.into_inner();
     let data: Store<&[u8]>;
 
-    match form.data {
-        Store::Persist(_) => {
+    match form.store.as_ref() {
+        PERSIST => {
             data = Store::Persist(form.data.as_ref());
         }
 
         _ => {
-            return HttpResponse::InternalServerError()
-                .content_type("text/html")
-                .body(html::wrap_html(
-                    "<p>Error: in-memory store or bytes clipboard not implemented</p>",
-                ));
+            data = Store::Mem(form.data.as_ref());
         }
     }
 
@@ -115,7 +141,7 @@ async fn post_drop(
     let mut hash = format!("{:x}", Sha256::digest(data));
     hash.truncate(4);
 
-    match form.data {
+    match data {
         Store::Persist(_) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
@@ -126,11 +152,12 @@ async fn post_drop(
             }
         }
 
+        // Send Store::Mem to another thread
         Store::Mem(_) => {
             return HttpResponse::InternalServerError()
                 .content_type("text/html")
                 .body(html::wrap_html(
-                    "<p>Error: in-memory store not implemented</p>",
+                    "<p>Error: in-memory store or bytes clipboard not implemented</p>",
                 ));
         }
     }
@@ -197,13 +224,14 @@ async fn main() {
             .route("/", web::get().to(landing_page))
             .route("/drop", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
-            .service(post_drop)
             .service(get_drop)
+            .service(post_drop)
     });
 
-    println!("actix-drop listening on http://localhost:3000...");
+    let addr = "http://127.0.0.1:3000";
+    println!("actix-drop listening on {}...", addr);
     server
-        .bind("127.0.0.1:3000")
+        .bind(addr)
         .expect("error binding server to address")
         .run()
         .await
