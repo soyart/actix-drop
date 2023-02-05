@@ -4,9 +4,12 @@ use sha2::{Digest, Sha256};
 mod data;
 mod html;
 mod persist;
+mod store;
+
+use store::Store;
 
 // TODO: new struct or manually implement Deserialize
-type ClipboardRequest = data::Store;
+type ClipboardRequest = Store;
 
 // Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -21,8 +24,8 @@ async fn landing_page() -> HttpResponse {
             </select>
             <button type="submit">Send</button>
             </form>"#,
-            data::MEM,
-            data::PERSIST,
+            store::MEM,
+            store::PERSIST,
         )))
 }
 
@@ -49,7 +52,7 @@ async fn post_drop<'a>(
     hash.truncate(4);
 
     match clipboard {
-        data::Store::Persist(data) => {
+        Store::Persist(data) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
 
@@ -59,7 +62,7 @@ async fn post_drop<'a>(
             }
         }
 
-        data::Store::Mem(_) => {
+        Store::Mem(_) => {
             return HttpResponse::InternalServerError()
                 .content_type("text/html")
                 .body(html::wrap_html(
