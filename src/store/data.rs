@@ -22,6 +22,18 @@ impl From<&str> for Data {
     }
 }
 
+impl From<Vec<u8>> for Data {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
+impl Into<Vec<u8>> for Data {
+    fn into(self) -> Vec<u8> {
+        self.0
+    }
+}
+
 impl TryInto<String> for Data {
     type Error = std::string::FromUtf8Error;
     fn try_into(self) -> Result<String, Self::Error> {

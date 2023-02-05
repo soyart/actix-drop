@@ -1,3 +1,5 @@
+use super::error::StoreError;
+
 use std::env;
 use std::path::Path;
 
@@ -9,7 +11,7 @@ pub fn assert_dir() {
         std::fs::create_dir(dir).expect("failed to create storage directory");
     };
 
-    match check_dir(DIR) {
+    match dir_exists(DIR) {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => create_dir(DIR),
         Ok(false) => create_dir(DIR),
 
@@ -21,23 +23,27 @@ pub fn assert_dir() {
     }
 }
 
-pub fn write_clipboard_file<S>(name: S, content: &[u8]) -> std::io::Result<()>
+pub fn write_clipboard_file<S>(name: S, content: &[u8]) -> Result<(), StoreError>
 where
     S: AsRef<Path>,
 {
     let path = Path::new(DIR).join(name.as_ref());
-    std::fs::write(path, content)
+    std::fs::write(path, content)?;
+
+    Ok(())
 }
 
-pub fn read_clipboard_file<S>(id: S) -> std::io::Result<Vec<u8>>
+pub fn read_clipboard_file<S>(id: S) -> Result<Vec<u8>, StoreError>
 where
     S: AsRef<Path>,
 {
     let path = Path::new(DIR).join(id.as_ref());
-    std::fs::read(path)
+    let data = std::fs::read(path)?;
+
+    Ok(data)
 }
 
-pub fn check_dir(dst: &str) -> std::io::Result<bool> {
+pub fn dir_exists(dst: &str) -> std::io::Result<bool> {
     let mut pwd = env::current_dir()?;
     pwd.push(dst);
     let metadata = std::fs::metadata(pwd)?;

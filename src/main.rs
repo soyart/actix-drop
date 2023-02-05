@@ -1,15 +1,14 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer};
 use sha2::{Digest, Sha256};
 
-mod data;
 mod html;
-mod persist;
 mod store;
 
+use store::error::StoreError;
 use store::Store;
 
 // TODO: new struct or manually implement Deserialize
-type ClipboardRequest = Store;
+type Clipboard = store::Store;
 
 // Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -35,10 +34,10 @@ async fn landing_page() -> HttpResponse {
 // It can handle both HTML form and JSON request.
 #[post("/drop")]
 async fn post_drop<'a>(
-    req: web::Either<web::Form<ClipboardRequest>, web::Json<ClipboardRequest>>,
+    req: web::Either<web::Form<Clipboard>, web::Json<Clipboard>>,
 ) -> HttpResponse {
     // Extract clipboard from web::Either<web::Form, web::Json>
-    let clipboard: ClipboardRequest = req.into_inner();
+    let clipboard = req.into_inner();
     if clipboard.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
@@ -46,34 +45,20 @@ async fn post_drop<'a>(
     }
 
     // hash is hex-coded string of SHA2 hash of form.text.
-    // hash will be truncated to string of length 4, and
-    // the short stringa
+    // hash will be truncated to string of length 4, and used as clipboard key.
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
 
-    match clipboard {
-        Store::Persist(data) => {
-            if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
-                eprintln!("write_file error: {}", err.to_string());
-
-                return HttpResponse::InternalServerError()
-                    .content_type("text/html")
-                    .body(html::wrap_html("<p>Error: cannot save clipboard</p>"));
-            }
-        }
-
-        Store::Mem(_) => {
-            return HttpResponse::InternalServerError()
-                .content_type("text/html")
-                .body(html::wrap_html(
-                    "<p>Error: in-memory store or bytes clipboard not implemented</p>",
-                ));
-        }
+    if clipboard.save_clipboard(&hash).is_err() {
+        return HttpResponse::InternalServerError()
+            .content_type("text/html")
+            .body(html::wrap_html("<p>Error: cannot save clipboard</p>"));
     }
 
     let body = format!(
-        r#"<p>Clipboard with hash <code>{0}</code> created</p>
-        <p>The clipboard is now available at path <a href="/drop/{0}"><code>/drop/{0}</code></a></p>"#,
+        r#"<p>Clipboard with hash <code>{1}</code> created</p>
+        <p>The clipboard is now available at path <a href="/drop/{0}/{1}"><code>/drop/{0}/{1}</code></a></p>"#,
+        clipboard.key(),
         hash,
     );
 
@@ -83,20 +68,35 @@ async fn post_drop<'a>(
 }
 
 // Retrive the clipboard based on its ID as per post_drop.
-#[get("/drop/{id}")]
-async fn get_drop(id: web::Path<String>) -> HttpResponse {
-    match persist::read_clipboard_file::<std::path::PathBuf>(id.clone().into()) {
+#[get("/drop/{store}/{id}")]
+async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
+    let (store, id) = path.into_inner();
+    let mut store = Store::new(&store);
+
+    match store.read_clipboard(&id) {
+        Err(StoreError::Bug(err)) => {
+            eprintln!("actix-drop bug: {}", err.to_string());
+            let body = format!(
+                "Error: found unexpected error for clipboard: <code>{}</code>",
+                id
+            );
+
+            return HttpResponse::InternalServerError()
+                .content_type("text/html")
+                .body(html::wrap_html(&body));
+        }
+
         Err(err) => {
             eprintln!("read_clipboard error: {}", err.to_string());
-
             let body = format!("Error: no such clipboard: <code>{}</code>", id);
+
             return HttpResponse::NotFound()
                 .content_type("text/html")
                 .body(html::wrap_html(&body));
         }
 
-        Ok(clipboard) => {
-            let text = String::from_utf8(clipboard);
+        Ok(()) => {
+            let text = String::from_utf8(store.to_vec());
             if text.is_err() {
                 return HttpResponse::InternalServerError()
                     .content_type("text/html")
@@ -126,7 +126,7 @@ async fn serve_css() -> HttpResponse {
 #[actix_web::main]
 async fn main() {
     // Ensure that ./${DIR} is a directory
-    persist::assert_dir();
+    store::persist::assert_dir();
 
     let server = HttpServer::new(|| {
         App::new()
