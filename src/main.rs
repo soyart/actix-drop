@@ -1,91 +1,12 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+mod data;
 mod html;
 mod persist;
 
-const MEM: &str = "mem";
-const PERSIST: &str = "persist";
-
-// enum Store specifies which type of storage to use
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[serde(tag = "store", content = "data")]
-enum Store<T>
-where
-    T: AsRef<[u8]>,
-{
-    Mem(T),
-    Persist(T),
-}
-
-impl<T> std::ops::Deref for Store<T>
-where
-    T: AsRef<[u8]>,
-{
-    type Target = T;
-
-    fn deref(self: &Self) -> &Self::Target {
-        match self {
-            Self::Mem(t) => return &t,
-            Self::Persist(t) => return &t,
-        }
-    }
-}
-
-impl<T> AsRef<[u8]> for Store<T>
-where
-    T: AsRef<[u8]>,
-{
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Self::Mem(t) => return t.as_ref(),
-            Self::Persist(t) => return t.as_ref(),
-        }
-    }
-}
-
-impl<T> std::fmt::Debug for Store<T>
-where
-    T: AsRef<[u8]>,
-{
-    fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let key = match self {
-            Self::Persist(_) => PERSIST,
-            Self::Mem(_) => MEM,
-        };
-
-        let val = self.as_ref();
-        let s = std::str::from_utf8(val);
-
-        if let Ok(string) = s {
-            write!(formatter, r#""{}":"{}""#, key, string)
-        } else {
-            write!(formatter, r#""{}":"{:?}"#, key, val)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_display_store() {
-        use super::Store;
-        let mem_str = Store::Mem("foo");
-        assert_eq!(r#""mem":"foo""#, format!("{:?}", mem_str));
-
-        let persist_bin = Store::Persist(vec![14, 16, 200]);
-        assert_eq!(r#""persist":"[14, 16, 200]"#, format!("{:?}", persist_bin));
-
-        // Valid UTF-8 byte array should be formatted as string
-        let mem_str_vec = Store::Mem("foo".bytes().collect::<Vec<u8>>());
-        assert_eq!(r#""mem":"foo""#, format!("{:?}", mem_str_vec));
-    }
-}
-
 // TODO: new struct or manually implement Deserialize
-type ClipboardRequest = Store<String>;
+type ClipboardRequest = data::Store;
 
 // Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -100,7 +21,8 @@ async fn landing_page() -> HttpResponse {
             </select>
             <button type="submit">Send</button>
             </form>"#,
-            MEM, PERSIST,
+            data::MEM,
+            data::PERSIST,
         )))
 }
 
@@ -127,7 +49,7 @@ async fn post_drop<'a>(
     hash.truncate(4);
 
     match clipboard {
-        Store::Persist(data) => {
+        data::Store::Persist(data) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
 
@@ -137,8 +59,7 @@ async fn post_drop<'a>(
             }
         }
 
-        // Send Store::Mem to another thread
-        Store::Mem(_) => {
+        data::Store::Mem(_) => {
             return HttpResponse::InternalServerError()
                 .content_type("text/html")
                 .body(html::wrap_html(
