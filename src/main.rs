@@ -7,10 +7,9 @@ mod store;
 use store::error::StoreError;
 use store::Store;
 
-// TODO: new struct or manually implement Deserialize
 type Clipboard = store::Store;
 
-// Return HTML form for entering text to be saved
+/// Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html")
@@ -28,10 +27,9 @@ async fn landing_page() -> HttpResponse {
         )))
 }
 
-// Receive Clipboard from HTML form sent by get_index, and save text to file.
-// The text will be hashed, and the first 4 hex-encoded string of the hash
-// will be used as filename as ID for the clipboard.
-// It can handle both HTML form and JSON request.
+/// post_drop receives Clipboard from HTML form (sent by the form in landing_page) or JSON request,
+/// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
+/// will be used as filename as ID for the clipboard.
 #[post("/drop")]
 async fn post_drop<'a>(
     req: web::Either<web::Form<Clipboard>, web::Json<Clipboard>>,
@@ -67,7 +65,7 @@ async fn post_drop<'a>(
         .body(html::wrap_html(&body))
 }
 
-// Retrive the clipboard based on its ID as per post_drop.
+/// get_drop retrieves and returns the clipboard based on its storage and ID as per post_drop.
 #[get("/drop/{store}/{id}")]
 async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
     let (store, id) = path.into_inner();

@@ -10,10 +10,12 @@ use error::StoreError;
 pub const MEM: &str = "mem";
 pub const PERSIST: &str = "persist";
 
-// enum Store specifies which type of storage to use
+/// Store enumerates over types of storage to use for a clipboard,
+/// with clipboard data as the value.
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[serde(tag = "store", content = "data")]
+#[serde(tag = "store", content = "data")] // TODO: remove this and use format { "mem": "data bytes" }
+                                          // (HTML form forces us to use this style for now)
 pub enum Store {
     Mem(Data),
     Persist(Data),
@@ -37,7 +39,9 @@ impl Store {
     pub fn save_clipboard(&self, hash: &str) -> Result<(), error::StoreError> {
         match self {
             Self::Persist(data) => persist::write_clipboard_file(hash, data.as_ref()),
-            Self::Mem(_) => Err(error::StoreError::NotImplemented),
+            Self::Mem(_) => Err(error::StoreError::NotImplemented(
+                "write to mem".to_string(),
+            )),
         }
     }
 
@@ -51,7 +55,9 @@ impl Store {
                     Ok(())
                 }
 
-                Self::Mem(_) => Err(error::StoreError::NotImplemented),
+                Self::Mem(_) => Err(error::StoreError::NotImplemented(
+                    "read from mem".to_string(),
+                )),
             }
         } else {
             Err(StoreError::Bug(
@@ -92,18 +98,12 @@ impl AsRef<[u8]> for Store {
 
 impl std::fmt::Debug for Store {
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let key = match self {
-            Self::Persist(_) => PERSIST,
-            Self::Mem(_) => MEM,
-        };
+        let bytes: &[u8] = self.as_ref();
 
-        let val = self.as_ref();
-        let s = std::str::from_utf8(val);
-
-        if let Ok(string) = s {
-            write!(formatter, r#""{}":"{}""#, key, string)
+        if let Ok(string) = std::str::from_utf8(bytes) {
+            write!(formatter, r#""{}":"{}""#, self.key(), string)
         } else {
-            write!(formatter, r#""{}":"{:?}"#, key, val)
+            write!(formatter, r#""{}":"{:?}"#, self.key(), bytes)
         }
     }
 }
