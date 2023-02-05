@@ -5,12 +5,13 @@ use sha2::{Digest, Sha256};
 mod html;
 mod persist;
 
-const MEM: &str = "MEM";
-const PERSIST: &str = "PERSIST";
+const MEM: &str = "mem";
+const PERSIST: &str = "persist";
 
 // enum Store specifies which type of storage to use
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[serde(tag = "store", content = "data")]
 enum Store<T>
 where
     T: AsRef<[u8]>,
@@ -45,7 +46,7 @@ where
     }
 }
 
-impl<T> std::fmt::Display for Store<T>
+impl<T> std::fmt::Debug for Store<T>
 where
     T: AsRef<[u8]>,
 {
@@ -72,23 +73,19 @@ mod tests {
     fn test_display_store() {
         use super::Store;
         let mem_str = Store::Mem("foo");
-        assert_eq!(r#""MEM":"foo""#, format!("{}", mem_str));
+        assert_eq!(r#""mem":"foo""#, format!("{:?}", mem_str));
 
         let persist_bin = Store::Persist(vec![14, 16, 200]);
-        assert_eq!(r#""PERSIST":"[14, 16, 200]"#, format!("{}", persist_bin));
+        assert_eq!(r#""persist":"[14, 16, 200]"#, format!("{:?}", persist_bin));
 
         // Valid UTF-8 byte array should be formatted as string
         let mem_str_vec = Store::Mem("foo".bytes().collect::<Vec<u8>>());
-        assert_eq!(r#""MEM":"foo""#, format!("{}", mem_str_vec));
+        assert_eq!(r#""mem":"foo""#, format!("{:?}", mem_str_vec));
     }
 }
 
 // TODO: new struct or manually implement Deserialize
-#[derive(Deserialize)]
-struct ClipboardRequest {
-    data: String,
-    store: String,
-}
+type ClipboardRequest = Store<String>;
 
 // Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -115,20 +112,9 @@ async fn landing_page() -> HttpResponse {
 async fn post_drop<'a>(
     req: web::Either<web::Form<ClipboardRequest>, web::Json<ClipboardRequest>>,
 ) -> HttpResponse {
-    let form = req.into_inner();
-    let data: Store<&[u8]>;
-
-    match form.store.as_ref() {
-        PERSIST => {
-            data = Store::Persist(form.data.as_ref());
-        }
-
-        _ => {
-            data = Store::Mem(form.data.as_ref());
-        }
-    }
-
-    if data.is_empty() {
+    // Extract clipboard from web::Either<web::Form, web::Json>
+    let clipboard: ClipboardRequest = req.into_inner();
+    if clipboard.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
             .body(html::wrap_html("<p>Error: blank clipboard sent</p>"));
@@ -137,12 +123,11 @@ async fn post_drop<'a>(
     // hash is hex-coded string of SHA2 hash of form.text.
     // hash will be truncated to string of length 4, and
     // the short stringa
-    let data = &data;
-    let mut hash = format!("{:x}", Sha256::digest(data));
+    let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
 
-    match data {
-        Store::Persist(_) => {
+    match clipboard {
+        Store::Persist(data) => {
             if let Err(err) = persist::write_clipboard_file(&hash, data.as_ref()) {
                 eprintln!("write_file error: {}", err.to_string());
 
@@ -228,7 +213,7 @@ async fn main() {
             .service(post_drop)
     });
 
-    let addr = "http://127.0.0.1:3000";
+    let addr = "127.0.0.1:3000";
     println!("actix-drop listening on {}...", addr);
     server
         .bind(addr)
