@@ -1,13 +1,21 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 mod html;
 mod store;
 
+use store::data::Data;
 use store::error::StoreError;
 use store::Store;
 
-type Clipboard = store::Store;
+#[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
+struct ReqForm {
+    store: String,
+    data: Data,
+}
+
+type ReqJson = store::Store; // eg: {"mem" = "my_data" }
 
 /// Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -31,11 +39,28 @@ async fn landing_page() -> HttpResponse {
 /// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
 /// will be used as filename as ID for the clipboard.
 #[post("/drop")]
-async fn post_drop<'a>(
-    req: web::Either<web::Form<Clipboard>, web::Json<Clipboard>>,
-) -> HttpResponse {
+async fn post_drop<'a>(req: web::Either<web::Form<ReqForm>, web::Json<ReqJson>>) -> HttpResponse {
     // Extract clipboard from web::Either<web::Form, web::Json>
-    let clipboard = req.into_inner();
+    let clipboard = match req {
+        web::Either::Left(form) => {
+            let form = form.into_inner();
+            let mut store = Store::new(&form.store);
+            store.set_data(form.data);
+            store
+        }
+
+        web::Either::Right(req_json) => req_json.into_inner(), // into_inner yields ReqJson. which is an alias to Store anyway
+    };
+
+    if let Err(err) = clipboard.is_implemented() {
+        return HttpResponse::BadRequest()
+            .content_type("text/html")
+            .body(html::wrap_html(&format!(
+                "<p>Error: bad clipboard store: {}</p>",
+                err.to_string(),
+            )));
+    }
+
     if clipboard.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")

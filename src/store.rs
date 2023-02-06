@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-mod data;
+pub mod data;
 pub mod error;
 pub mod persist;
 
@@ -14,8 +14,6 @@ pub const PERSIST: &str = "persist";
 /// with clipboard data as the value.
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[serde(tag = "store", content = "data")] // TODO: remove this and use format { "mem": "data bytes" }
-                                          // (HTML form forces us to use this style for now)
 pub enum Store {
     Mem(Data),
     Persist(Data),
@@ -26,6 +24,23 @@ impl Store {
         match t {
             PERSIST => Self::Persist(Vec::new().into()),
             _ => Self::Mem(Vec::new().into()),
+        }
+    }
+
+    pub fn is_implemented(&self) -> Result<(), StoreError> {
+        match self {
+            Self::Persist(_) => Ok(()),
+            Self::Mem(_) => Err(StoreError::NotImplemented("in-memory store".to_string())),
+        }
+    }
+
+    pub fn set_data<T>(&mut self, data: T)
+    where
+        T: Into<Data>,
+    {
+        match self {
+            Self::Persist(ref mut store_data) => *store_data = data.into(),
+            Self::Mem(ref mut store_data) => *store_data = data.into(),
         }
     }
 
