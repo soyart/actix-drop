@@ -27,20 +27,20 @@ impl Store {
         }
     }
 
+    pub fn new_with_data<T>(t: &str, data: T) -> Self
+    where
+        T: Into<Data>,
+    {
+        match t {
+            PERSIST => Self::Persist(data.into()),
+            _ => Self::Mem(data.into()),
+        }
+    }
+
     pub fn is_implemented(&self) -> Result<(), StoreError> {
         match self {
             Self::Persist(_) => Ok(()),
             Self::Mem(_) => Err(StoreError::NotImplemented("in-memory store".to_string())),
-        }
-    }
-
-    pub fn set_data<T>(&mut self, data: T)
-    where
-        T: Into<Data>,
-    {
-        match self {
-            Self::Persist(ref mut store_data) => *store_data = data.into(),
-            Self::Mem(ref mut store_data) => *store_data = data.into(),
         }
     }
 

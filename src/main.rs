@@ -15,6 +15,12 @@ struct ReqForm {
     data: Data,
 }
 
+impl Into<Store> for ReqForm {
+    fn into(self) -> Store {
+        Store::new_with_data(&self.store, self.data)
+    }
+}
+
 type ReqJson = store::Store; // eg: {"mem" = "my_data" }
 
 /// Return HTML form for entering text to be saved
@@ -42,14 +48,8 @@ async fn landing_page() -> HttpResponse {
 async fn post_drop<'a>(req: web::Either<web::Form<ReqForm>, web::Json<ReqJson>>) -> HttpResponse {
     // Extract clipboard from web::Either<web::Form, web::Json>
     let clipboard = match req {
-        web::Either::Left(form) => {
-            let form = form.into_inner();
-            let mut store = Store::new(&form.store);
-            store.set_data(form.data);
-            store
-        }
-
-        web::Either::Right(req_json) => req_json.into_inner(), // into_inner yields ReqJson. which is an alias to Store anyway
+        web::Either::Left(web::Form(req_form)) => req_form.into(),
+        web::Either::Right(web::Json(req_json)) => req_json,
     };
 
     if let Err(err) = clipboard.is_implemented() {
