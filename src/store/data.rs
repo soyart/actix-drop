@@ -12,27 +12,12 @@ impl AsRef<[u8]> for Data {
     }
 }
 
-impl From<String> for Data {
-    fn from(s: String) -> Self {
-        Self(s.into())
-    }
-}
-
-impl From<&str> for Data {
-    fn from(s: &str) -> Self {
-        Self(s.into())
-    }
-}
-
-impl From<Vec<u8>> for Data {
-    fn from(value: Vec<u8>) -> Self {
-        Self(value)
-    }
-}
-
-impl Into<Vec<u8>> for Data {
-    fn into(self) -> Vec<u8> {
-        self.0
+impl<'a, T> From<T> for Data
+where
+    T: Into<Vec<u8>>,
+{
+    fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 

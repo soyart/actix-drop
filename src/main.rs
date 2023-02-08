@@ -1,4 +1,4 @@
-use actix_web::{get, post, web, App, HttpResponse, HttpServer};
+use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -44,12 +44,14 @@ async fn landing_page() -> HttpResponse {
 /// post_drop receives Clipboard from HTML form (sent by the form in landing_page) or JSON request,
 /// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
 /// will be used as filename as ID for the clipboard.
-#[post("/drop")]
-async fn post_drop<'a>(req: web::Either<web::Form<ReqForm>, web::Json<ReqJson>>) -> HttpResponse {
-    // Extract clipboard from web::Either<web::Form, web::Json>
+async fn post_drop<F, J>(req: web::Either<web::Form<F>, web::Json<J>>) -> HttpResponse
+where
+    F: Into<Store>,
+    J: Into<Store>,
+{
     let clipboard = match req {
-        web::Either::Left(web::Form(req_form)) => req_form.into(),
-        web::Either::Right(web::Json(req_json)) => req_json,
+        web::Either::Left(web::Form(form)) => form.into(),
+        web::Either::Right(web::Json(json)) => json.into(),
     };
 
     if let Err(err) = clipboard.is_implemented() {
@@ -67,7 +69,7 @@ async fn post_drop<'a>(req: web::Either<web::Form<ReqForm>, web::Json<ReqJson>>)
             .body(html::wrap_html("<p>Error: blank clipboard sent</p>"));
     }
 
-    // hash is hex-coded string of SHA2 hash of form.text.
+    // hash is hex-coded string of SHA2 hash of clipboard.text.
     // hash will be truncated to string of length 4, and used as clipboard key.
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
@@ -97,21 +99,21 @@ async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
     let mut store = Store::new(&store);
 
     match store.read_clipboard(&id) {
-        Err(StoreError::Bug(err)) => {
-            eprintln!("actix-drop bug: {}", err.to_string());
-            let body = format!(
-                "Error: found unexpected error for clipboard: <code>{}</code>",
-                id
-            );
-
-            return HttpResponse::InternalServerError()
-                .content_type("text/html")
-                .body(html::wrap_html(&body));
-        }
-
         Err(err) => {
-            eprintln!("read_clipboard error: {}", err.to_string());
-            let body = format!("Error: no such clipboard: <code>{}</code>", id);
+            let body;
+            match err {
+                StoreError::Bug(bug) => {
+                    eprintln!("actix-drop bug: {}", bug.to_string());
+                    body = format!(
+                        "Error: found unexpected error for clipboard: <code>{}</code>",
+                        id
+                    );
+                }
+                _ => {
+                    eprintln!("read_clipboard error: {}", err.to_string());
+                    body = format!("Error: no such clipboard: <code>{}</code>", id);
+                }
+            }
 
             return HttpResponse::NotFound()
                 .content_type("text/html")
@@ -154,10 +156,10 @@ async fn main() {
     let server = HttpServer::new(|| {
         App::new()
             .route("/", web::get().to(landing_page))
-            .route("/drop", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
+            .route("/drop", web::get().to(landing_page))
+            .route("/drop", web::post().to(post_drop::<ReqForm, ReqJson>))
             .service(get_drop)
-            .service(post_drop)
     });
 
     let addr = "127.0.0.1:3000";
