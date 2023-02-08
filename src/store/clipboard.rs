@@ -1,12 +1,9 @@
 use serde::Deserialize;
+// use std::collections::HashMap;
 
-pub mod data;
-pub mod error;
-pub mod persist;
-pub mod tracker;
-
-use data::Data;
-use error::StoreError;
+use super::data::Data;
+use super::error::StoreError;
+use super::persist;
 
 pub const MEM: &str = "mem";
 pub const PERSIST: &str = "persist";
@@ -15,12 +12,12 @@ pub const PERSIST: &str = "persist";
 /// with clipboard data as the value.
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Store {
+pub enum Clipboard {
     Mem(Data),
     Persist(Data),
 }
 
-impl Store {
+impl Clipboard {
     pub fn new(t: &str) -> Self {
         match t {
             PERSIST => Self::Persist(Vec::new().into()),
@@ -52,18 +49,16 @@ impl Store {
         }
     }
 
-    pub fn save_clipboard(&self, hash: &str) -> Result<(), error::StoreError> {
+    pub fn save_clipboard(&self, hash: &str) -> Result<(), StoreError> {
         match self {
             Self::Persist(data) => persist::write_clipboard_file(hash, data.as_ref()),
-            Self::Mem(_) => Err(error::StoreError::NotImplemented(
-                "write to mem".to_string(),
-            )),
+            Self::Mem(_) => Err(StoreError::NotImplemented("write to mem".to_string())),
         }
     }
 
     // read_clipboard reads clipboard from source and saves the data to self.
     // If self is not empty, StoreError::NotImplemented is returned
-    pub fn read_clipboard(&mut self, hash: &str) -> Result<(), error::StoreError> {
+    pub fn read_clipboard(&mut self, hash: &str) -> Result<(), StoreError> {
         if self.is_empty() {
             match self {
                 Self::Persist(data) => {
@@ -71,9 +66,7 @@ impl Store {
                     Ok(())
                 }
 
-                Self::Mem(_) => Err(error::StoreError::NotImplemented(
-                    "read from mem".to_string(),
-                )),
+                Self::Mem(_) => Err(StoreError::NotImplemented("read from mem".to_string())),
             }
         } else {
             Err(StoreError::Bug(
@@ -83,7 +76,7 @@ impl Store {
     }
 }
 
-impl std::ops::Deref for Store {
+impl std::ops::Deref for Clipboard {
     type Target = [u8];
 
     fn deref(self: &Self) -> &Self::Target {
@@ -94,7 +87,7 @@ impl std::ops::Deref for Store {
     }
 }
 
-impl AsRef<Data> for Store {
+impl AsRef<Data> for Clipboard {
     fn as_ref(&self) -> &Data {
         match self {
             Self::Mem(data) => data,
@@ -103,7 +96,7 @@ impl AsRef<Data> for Store {
     }
 }
 
-impl AsRef<[u8]> for Store {
+impl AsRef<[u8]> for Clipboard {
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Mem(data) => return data.as_ref(),
@@ -112,7 +105,7 @@ impl AsRef<[u8]> for Store {
     }
 }
 
-impl std::fmt::Debug for Store {
+impl std::fmt::Debug for Clipboard {
     fn fmt(self: &Self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bytes: &[u8] = self.as_ref();
 
@@ -126,18 +119,18 @@ impl std::fmt::Debug for Store {
 
 #[cfg(test)]
 mod tests {
-    use super::{data::Data, Store};
+    use super::{Clipboard, Data};
 
     #[test]
     fn test_store_debug() {
-        let mem_str = Store::Mem("foo".into());
+        let mem_str = Clipboard::Mem("foo".into());
         assert_eq!(r#""mem":"foo""#, format!("{:?}", mem_str));
 
-        let persist_bin = Store::Persist(Data(vec![14, 16, 200]));
+        let persist_bin = Clipboard::Persist(Data(vec![14, 16, 200]));
         assert_eq!(r#""persist":"[14, 16, 200]"#, format!("{:?}", persist_bin));
 
         // Valid UTF-8 byte array should be formatted as string
-        let mem_str_vec = Store::Mem("bar".into());
+        let mem_str_vec = Clipboard::Mem("bar".into());
         assert_eq!(r#""mem":"bar""#, format!("{:?}", mem_str_vec));
     }
 }

@@ -6,10 +6,10 @@ use std::sync::{mpsc, Arc, Mutex};
 mod html;
 mod store;
 
+use store::clipboard::Clipboard;
 use store::data::Data;
 use store::error::StoreError;
 use store::tracker;
-use store::Store;
 
 #[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
 struct ReqForm {
@@ -17,13 +17,13 @@ struct ReqForm {
     data: Data,
 }
 
-impl Into<Store> for ReqForm {
-    fn into(self) -> Store {
-        Store::new_with_data(&self.store, self.data)
+impl Into<Clipboard> for ReqForm {
+    fn into(self) -> Clipboard {
+        Clipboard::new_with_data(&self.store, self.data)
     }
 }
 
-type ReqJson = store::Store; // eg: {"mem" = "my_data" }
+type ReqJson = Clipboard; // eg: {"mem" = "my_data" }
 
 /// Return HTML form for entering text to be saved
 async fn landing_page() -> HttpResponse {
@@ -38,8 +38,8 @@ async fn landing_page() -> HttpResponse {
             </select>
             <button type="submit">Send</button>
             </form>"#,
-            store::MEM,
-            store::PERSIST,
+            store::clipboard::MEM,
+            store::clipboard::PERSIST,
         )))
 }
 
@@ -49,11 +49,11 @@ async fn landing_page() -> HttpResponse {
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
 async fn post_drop<F, J>(
     req: web::Either<web::Form<F>, web::Json<J>>,
-    tx: web::Data<mpsc::Sender<(String, Store)>>,
+    tx: web::Data<mpsc::Sender<(String, Clipboard)>>,
 ) -> HttpResponse
 where
-    F: Into<Store>,
-    J: Into<Store>,
+    F: Into<Clipboard>,
+    J: Into<Clipboard>,
 {
     let clipboard = match req {
         web::Either::Left(web::Form(form)) => form.into(),
@@ -107,7 +107,7 @@ where
 #[get("/drop/{store}/{id}")]
 async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
     let (store, id) = path.into_inner();
-    let mut store = Store::new(&store);
+    let mut store = Clipboard::new(&store);
 
     match store.read_clipboard(&id) {
         Err(err) => {
@@ -164,7 +164,7 @@ async fn main() {
     // Ensure that ./${DIR} is a directory
     store::persist::assert_dir();
 
-    let (tx, rx) = mpsc::channel::<(String, Store)>();
+    let (tx, rx) = mpsc::channel::<(String, Clipboard)>();
 
     let tracker = Arc::new(Mutex::new(tracker::Tracker::new()));
     let also_tracker = tracker.clone();
@@ -176,8 +176,7 @@ async fn main() {
         tracker::clear_expired_clipboards(tracker, dur);
     });
 
-    // This thread loops forever and adds new item to tracker as
-    // new
+    // This thread loops forever and adds new item to tracker
     std::thread::spawn(|| tracker::loop_add_tracker(rx, also_tracker));
 
     let server = HttpServer::new(move || {
