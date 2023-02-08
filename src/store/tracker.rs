@@ -37,10 +37,20 @@ pub fn loop_add_tracker(
 }
 
 pub fn clear_expired_clipboards(tracker: Arc<Mutex<Tracker>>, dur: Duration) {
+    let mut expireds: Vec<String> = vec![];
+
     loop {
+        let mut tracker = tracker.lock().unwrap();
+        for expired in &expireds {
+            tracker.remove(expired);
+        }
+
+        expireds = vec![];
+
+        // TODO: Fix this fixed sleep
         std::thread::sleep(dur);
 
-        for (hash_key, (store, timeout)) in tracker.lock().unwrap().iter() {
+        for (hash_key, (store, timeout)) in tracker.iter() {
             if timeout.elapsed() > dur {
                 match store {
                     super::Store::Mem(_) => {}
@@ -51,6 +61,8 @@ pub fn clear_expired_clipboards(tracker: Arc<Mutex<Tracker>>, dur: Duration) {
                                 err.to_string()
                             );
                         }
+
+                        expireds.push(hash_key.clone());
                     }
                 }
             }
