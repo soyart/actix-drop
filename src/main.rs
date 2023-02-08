@@ -1,12 +1,14 @@
 use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::sync::{mpsc, Arc, Mutex};
 
 mod html;
 mod store;
 
 use store::data::Data;
 use store::error::StoreError;
+use store::tracker;
 use store::Store;
 
 #[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
@@ -44,7 +46,11 @@ async fn landing_page() -> HttpResponse {
 /// post_drop receives Clipboard from HTML form (sent by the form in landing_page) or JSON request,
 /// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
 /// will be used as filename as ID for the clipboard.
-async fn post_drop<F, J>(req: web::Either<web::Form<F>, web::Json<J>>) -> HttpResponse
+/// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
+async fn post_drop<F, J>(
+    req: web::Either<web::Form<F>, web::Json<J>>,
+    tx: web::Data<mpsc::Sender<(String, Store)>>,
+) -> HttpResponse
 where
     F: Into<Store>,
     J: Into<Store>,
@@ -86,6 +92,11 @@ where
         clipboard.key(),
         hash,
     );
+
+    let tx = tx.into_inner();
+    if let Err(err) = tx.send((hash.to_string(), clipboard)) {
+        panic!("failed to send to tx: {}", err.to_string());
+    };
 
     HttpResponse::Created()
         .content_type("text/html")
@@ -153,8 +164,25 @@ async fn main() {
     // Ensure that ./${DIR} is a directory
     store::persist::assert_dir();
 
-    let server = HttpServer::new(|| {
+    let (tx, rx) = mpsc::channel::<(String, Store)>();
+
+    let tracker = Arc::new(Mutex::new(tracker::Tracker::new()));
+    let also_tracker = tracker.clone();
+
+    // This thread sleeps for dur and then checks if any
+    // item in tracker has expired. If so, it removes it from tracker
+    let dur = std::time::Duration::from_secs(30);
+    std::thread::spawn(move || {
+        tracker::clear_expired_clipboards(tracker, dur);
+    });
+
+    // This thread loops forever and adds new item to tracker as
+    // new
+    std::thread::spawn(|| tracker::loop_add_tracker(rx, also_tracker));
+
+    let server = HttpServer::new(move || {
         App::new()
+            .app_data(web::Data::new(tx.clone()))
             .route("/", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
             .route("/drop", web::get().to(landing_page))

@@ -43,6 +43,16 @@ where
     Ok(data)
 }
 
+pub fn rm_clipboard_file<S>(id: S) -> Result<(), StoreError>
+where
+    S: AsRef<Path>,
+{
+    let path = Path::new(DIR).join(id.as_ref());
+    std::fs::remove_file(path)?;
+
+    Ok(())
+}
+
 pub fn dir_exists(dst: &str) -> std::io::Result<bool> {
     let mut pwd = env::current_dir()?;
     pwd.push(dst);

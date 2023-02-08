@@ -3,6 +3,7 @@ use serde::Deserialize;
 pub mod data;
 pub mod error;
 pub mod persist;
+pub mod tracker;
 
 use data::Data;
 use error::StoreError;
