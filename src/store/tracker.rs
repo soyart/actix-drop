@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::{mpsc, Mutex};
 
 use super::clipboard::Clipboard;
 use super::error::StoreError;
@@ -26,21 +27,24 @@ impl std::ops::DerefMut for Tracker {
     }
 }
 
-pub fn loop_add_tracker(recv: mpsc::Receiver<(String, Clipboard)>, tracker: Arc<Mutex<Tracker>>) {
-    for new_clipboard in recv {
+pub async fn loop_add_tracker(
+    mut recv: mpsc::Receiver<(String, Clipboard)>,
+    tracker: Arc<Mutex<Tracker>>,
+) {
+    if let Some(new_clipboard) = recv.recv().await {
         println!("found new clipboard {}", new_clipboard.0);
         tracker
             .lock()
-            .unwrap()
+            .await
             .insert(new_clipboard.0, (new_clipboard.1, Instant::now()));
     }
 }
 
-pub fn clear_expired_clipboards(tracker: Arc<Mutex<Tracker>>, dur: Duration) {
+pub async fn clear_expired_clipboards(tracker: Arc<Mutex<Tracker>>, dur: Duration) {
     let mut expireds: Vec<String> = vec![];
 
     loop {
-        let mut tracker = tracker.lock().unwrap();
+        let mut tracker = tracker.lock().await;
         for expired in &expireds {
             tracker.remove(expired);
         }

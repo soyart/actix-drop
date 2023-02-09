@@ -1,7 +1,8 @@
 use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
 mod html;
 mod store;
@@ -94,7 +95,7 @@ where
     );
 
     let tx = tx.into_inner();
-    if let Err(err) = tx.send((hash.to_string(), clipboard)) {
+    if let Err(err) = tx.send((hash.to_string(), clipboard)).await {
         panic!("failed to send to tx: {}", err.to_string());
     };
 
@@ -106,7 +107,7 @@ where
 /// get_drop retrieves and returns the clipboard based on its storage and ID as per post_drop.
 #[get("/drop/{store}/{id}")]
 async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
-    let (ref store, ref id) = path.into_inner();
+    let (store, id) = path.into_inner();
     let mut clipboard = Clipboard::new(&store);
 
     match clipboard.read_clipboard(&id) {
@@ -164,7 +165,7 @@ async fn main() {
     // Ensure that ./${DIR} is a directory
     store::persist::assert_dir();
 
-    let (tx, rx) = mpsc::channel::<(String, Clipboard)>();
+    let (tx, rx) = mpsc::channel::<(String, Clipboard)>(16);
 
     let tracker = Mutex::new(tracker::Tracker::new());
     let tracker1 = Arc::new(tracker);
@@ -173,12 +174,12 @@ async fn main() {
     // This thread sleeps for dur and then checks if any
     // item in tracker has expired. If so, it removes it from tracker
     let dur = std::time::Duration::from_secs(30);
-    std::thread::spawn(move || {
-        tracker::clear_expired_clipboards(tracker1, dur);
+    tokio::spawn(async move {
+        tracker::clear_expired_clipboards(tracker1, dur).await;
     });
 
     // This thread loops forever and adds new item to tracker
-    std::thread::spawn(|| tracker::loop_add_tracker(rx, tracker2));
+    tokio::spawn(async move { tracker::loop_add_tracker(rx, tracker2) });
 
     let server = HttpServer::new(move || {
         App::new()

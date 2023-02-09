@@ -232,6 +232,7 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
