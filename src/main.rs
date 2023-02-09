@@ -106,10 +106,10 @@ where
 /// get_drop retrieves and returns the clipboard based on its storage and ID as per post_drop.
 #[get("/drop/{store}/{id}")]
 async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
-    let (store, id) = path.into_inner();
-    let mut store = Clipboard::new(&store);
+    let (ref store, ref id) = path.into_inner();
+    let mut clipboard = Clipboard::new(&store);
 
-    match store.read_clipboard(&id) {
+    match clipboard.read_clipboard(&id) {
         Err(err) => {
             let body;
             match err {
@@ -132,7 +132,7 @@ async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
         }
 
         Ok(()) => {
-            let text = String::from_utf8(store.to_vec());
+            let text = String::from_utf8(clipboard.to_vec());
             if text.is_err() {
                 return HttpResponse::InternalServerError()
                     .content_type("text/html")
@@ -166,18 +166,19 @@ async fn main() {
 
     let (tx, rx) = mpsc::channel::<(String, Clipboard)>();
 
-    let tracker = Arc::new(Mutex::new(tracker::Tracker::new()));
-    let also_tracker = tracker.clone();
+    let tracker = Mutex::new(tracker::Tracker::new());
+    let tracker1 = Arc::new(tracker);
+    let tracker2 = tracker1.clone();
 
     // This thread sleeps for dur and then checks if any
     // item in tracker has expired. If so, it removes it from tracker
     let dur = std::time::Duration::from_secs(30);
     std::thread::spawn(move || {
-        tracker::clear_expired_clipboards(tracker, dur);
+        tracker::clear_expired_clipboards(tracker1, dur);
     });
 
     // This thread loops forever and adds new item to tracker
-    std::thread::spawn(|| tracker::loop_add_tracker(rx, also_tracker));
+    std::thread::spawn(|| tracker::loop_add_tracker(rx, tracker2));
 
     let server = HttpServer::new(move || {
         App::new()
