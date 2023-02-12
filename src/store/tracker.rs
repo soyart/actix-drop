@@ -28,6 +28,27 @@ impl Tracker {
 
         Ok(())
     }
+
+    pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
+        let handle = self.lock().unwrap();
+        let entry = handle.get(&hash.to_string());
+
+        if let Some(&Some(ref clipboard)) = entry {
+            // Clipboard::Persist
+            return Some(clipboard.clone());
+        } else if entry.is_some() {
+            // Clipboard::Mem
+            let mut clipboard = Clipboard::Persist(vec![].into());
+            if let Err(err) = clipboard.read_clipboard(hash) {
+                eprintln!("error reading file {}: {}", err.to_string(), hash);
+                return None;
+            }
+
+            return Some(clipboard);
+        }
+
+        None
+    }
 }
 
 pub async fn countdown_remove(
@@ -53,19 +74,30 @@ mod tracker_tests {
     use super::*;
     #[test]
     fn test_store_tracker() {
-        let hash = "foo".to_string();
+        let foo = "foo";
+        let bar = "bar";
+        let hashes = vec![foo, bar];
+
         let tracker = Tracker::new();
-        if let Err(err) =
-            tracker.store_new_clipboard(&hash, Clipboard::Persist("eiei".as_bytes().into()))
-        {
-            panic!("failed to insert: {}", err.to_string());
+        for h in hashes {
+            tracker
+                .store_new_clipboard(&h, Clipboard::Persist("eiei".as_bytes().into()))
+                .expect("failed to insert into tracker");
         }
 
         let dur = Duration::from_secs(1);
         let shared_tracker = Arc::new(tracker);
-        let fut = countdown_remove(shared_tracker.clone(), hash, dur);
+
         let rt = actix_web::rt::Runtime::new().unwrap();
-        rt.block_on(fut).unwrap();
+        let f1 = countdown_remove(shared_tracker.clone(), foo.to_string(), dur);
+        let f2 = countdown_remove(shared_tracker.clone(), bar.to_string(), dur);
+
+        rt.block_on(rt.spawn(f1))
+            .unwrap()
+            .expect("fail to spawn f1");
+        rt.block_on(rt.spawn(f2))
+            .unwrap()
+            .expect("fail to spawn f2");
 
         if !shared_tracker.to_owned().lock().unwrap().is_empty() {
             panic!("tracker not empty after cleared");

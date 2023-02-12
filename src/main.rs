@@ -8,7 +8,6 @@ mod store;
 
 use store::clipboard::Clipboard;
 use store::data::Data;
-use store::error::StoreError;
 use store::tracker::{countdown_remove, Tracker};
 
 #[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
@@ -48,8 +47,8 @@ async fn landing_page() -> HttpResponse {
 /// will be used as filename as ID for the clipboard.
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
 async fn post_drop<F, J>(
-    req: web::Either<web::Form<F>, web::Json<J>>,
     tracker: web::Data<Tracker>,
+    req: web::Either<web::Form<F>, web::Json<J>>,
 ) -> HttpResponse
 where
     F: Into<Clipboard>,
@@ -79,8 +78,6 @@ where
     // hash will be truncated to string of length 4, and used as clipboard key.
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
-    // Get storage type key
-    let key = clipboard.key();
 
     let tracker = tracker.into_inner();
     if let Err(err) = tracker.store_new_clipboard(&hash, clipboard) {
@@ -97,9 +94,8 @@ where
     ));
 
     let body = format!(
-        r#"<p>Clipboard with hash <code>{1}</code> created</p>
-        <p>The clipboard is now available at path <a href="/drop/{0}/{1}"><code>/drop/{0}/{1}</code></a></p>"#,
-        key, hash,
+        r#"<p>Clipboard with hash <code>{hash}</code> created</p>
+        <p>The clipboard is now available at path <a href="/drop/{hash}/"><code>/drop/{hash}/</code></a></p>"#,
     );
 
     HttpResponse::Created()
@@ -107,35 +103,15 @@ where
         .body(html::wrap_html(&body))
 }
 
-/// get_drop retrieves and returns the clipboard based on its storage and ID as per post_drop.
-#[get("/drop/{store}/{id}")]
-async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
-    let (ref store, ref id) = path.into_inner();
-    let mut clipboard = Clipboard::new(&store);
+/// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
+#[get("/drop/{id}/")]
+async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpResponse {
+    let id = path.into_inner();
+    let tracker = tracker.into_inner();
 
-    match clipboard.read_clipboard(&id) {
-        Err(err) => {
-            let body;
-            match err {
-                StoreError::Bug(bug) => {
-                    eprintln!("actix-drop bug: {}", bug.to_string());
-                    body = format!(
-                        "Error: found unexpected error for clipboard: <code>{}</code>",
-                        id
-                    );
-                }
-                _ => {
-                    eprintln!("read_clipboard error: {}", err.to_string());
-                    body = format!("Error: no such clipboard: <code>{}</code>", id);
-                }
-            }
-
-            return HttpResponse::NotFound()
-                .content_type("text/html")
-                .body(html::wrap_html(&body));
-        }
-
-        Ok(()) => {
+    let body;
+    match tracker.get_clipboard(&id) {
+        Some(clipboard) => {
             let text = String::from_utf8(clipboard.to_vec());
             if text.is_err() {
                 return HttpResponse::InternalServerError()
@@ -151,6 +127,13 @@ async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
             );
 
             return HttpResponse::Ok()
+                .content_type("text/html")
+                .body(html::wrap_html(&body));
+        }
+
+        None => {
+            body = format!("Error: no such clipboard: <code>{}</code>", id);
+            return HttpResponse::NotFound()
                 .content_type("text/html")
                 .body(html::wrap_html(&body));
         }

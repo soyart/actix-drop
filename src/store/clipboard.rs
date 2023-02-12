@@ -18,6 +18,7 @@ pub enum Clipboard {
 }
 
 impl Clipboard {
+    #[allow(dead_code)]
     pub fn new(t: &str) -> Self {
         match t {
             PERSIST => Self::Persist(Vec::new().into()),
@@ -36,10 +37,7 @@ impl Clipboard {
     }
 
     pub fn is_implemented(&self) -> Result<(), StoreError> {
-        match self {
-            Self::Persist(_) => Ok(()),
-            Self::Mem(_) => Err(StoreError::NotImplemented("in-memory store".to_string())),
-        }
+        Ok(())
     }
 
     pub fn key(&self) -> String {
@@ -52,7 +50,7 @@ impl Clipboard {
     pub fn save_clipboard(&self, hash: &str) -> Result<(), StoreError> {
         match self {
             Self::Persist(data) => persist::write_clipboard_file(hash, data.as_ref()),
-            Self::Mem(_) => Err(StoreError::NotImplemented("write to mem".to_string())),
+            Self::Mem(_) => Ok(()),
         }
     }
 
