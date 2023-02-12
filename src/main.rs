@@ -119,25 +119,23 @@ async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpR
                     .body(html::wrap_html("Error: clipboard is non UTF-8"));
             }
 
-            let body = format!(
+            body = format!(
                 r#"<p>Clipboard <code>{}</code>:</p>
                 <pre><code>{}</code></pre>"#,
                 id,
                 text.unwrap(),
             );
 
-            return HttpResponse::Ok()
-                .content_type("text/html")
-                .body(html::wrap_html(&body));
+            HttpResponse::Ok()
         }
 
         None => {
             body = format!("Error: no such clipboard: <code>{}</code>", id);
-            return HttpResponse::NotFound()
-                .content_type("text/html")
-                .body(html::wrap_html(&body));
+            HttpResponse::NotFound()
         }
     }
+    .content_type("text/html")
+    .body(html::wrap_html(&body))
 }
 
 async fn serve_css() -> HttpResponse {
