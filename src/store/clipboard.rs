@@ -10,7 +10,7 @@ pub const PERSIST: &str = "persist";
 
 /// Store enumerates over types of storage to use for a clipboard,
 /// with clipboard data as the value.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Clipboard {
     Mem(Data),
@@ -42,10 +42,10 @@ impl Clipboard {
         }
     }
 
-    pub fn key(&self) -> &str {
+    pub fn key(&self) -> String {
         match self {
-            Self::Mem(_) => MEM,
-            Self::Persist(_) => PERSIST,
+            Self::Mem(_) => MEM.to_string(),
+            Self::Persist(_) => PERSIST.to_string(),
         }
     }
 

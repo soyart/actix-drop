@@ -1,21 +1,80 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::clipboard::Clipboard;
 use super::error::StoreError;
+use super::persist;
 
-pub struct Tracker(HashMap<String, (Clipboard, Instant)>);
+/// Tracker is used to store in-memory actix-drop clipboard
+pub struct Tracker(Mutex<HashMap<Arc<String>, Option<Clipboard>>>);
 
 impl Tracker {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    pub fn store_new_clipboard(&self, hash: &str, clipboard: Clipboard) -> Result<(), StoreError> {
+        // Save the clipboard and then add an entry to tracker
+        clipboard.save_clipboard(hash)?;
+
+        let to_save = match clipboard.clone() {
+            clip @ Clipboard::Mem(_) => Some(clip),
+            Clipboard::Persist(_) => None,
+        };
+
+        let mut handle = self.lock().unwrap();
+        handle.insert(Arc::new(hash.to_string()), to_save);
+
+        Ok(())
+    }
+}
+
+pub async fn countdown_remove(
+    tracker: Arc<Tracker>,
+    hash: String,
+    dur: Duration,
+) -> Result<(), StoreError> {
+    actix_web::rt::time::sleep(dur).await;
+
+    let mut handle = tracker.lock().unwrap();
+    if let Some((_key, clipboard)) = handle.remove_entry(&hash.to_string()) {
+        // None = persisted to disk
+        if clipboard.is_none() {
+            persist::rm_clipboard_file(hash)?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tracker_tests {
+    use super::*;
+    #[test]
+    fn test_store_tracker() {
+        let hash = "foo".to_string();
+        let tracker = Tracker::new();
+        if let Err(err) =
+            tracker.store_new_clipboard(&hash, Clipboard::Persist("eiei".as_bytes().into()))
+        {
+            panic!("failed to insert: {}", err.to_string());
+        }
+
+        let dur = Duration::from_secs(1);
+        let shared_tracker = Arc::new(tracker);
+        let fut = countdown_remove(shared_tracker.clone(), hash, dur);
+        let rt = actix_web::rt::Runtime::new().unwrap();
+        rt.block_on(fut).unwrap();
+
+        if !shared_tracker.to_owned().lock().unwrap().is_empty() {
+            panic!("tracker not empty after cleared");
+        }
     }
 }
 
 impl std::ops::Deref for Tracker {
-    type Target = HashMap<String, (Clipboard, Instant)>;
+    type Target = Mutex<HashMap<Arc<String>, Option<Clipboard>>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -24,58 +83,5 @@ impl std::ops::Deref for Tracker {
 impl std::ops::DerefMut for Tracker {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-pub async fn loop_add_tracker(
-    mut recv: mpsc::Receiver<(String, Clipboard)>,
-    tracker: Arc<Mutex<Tracker>>,
-) {
-    if let Some(new_clipboard) = recv.recv().await {
-        println!("found new clipboard {}", new_clipboard.0);
-        tracker
-            .lock()
-            .await
-            .insert(new_clipboard.0, (new_clipboard.1, Instant::now()));
-    }
-}
-
-pub async fn clear_expired_clipboards(tracker: Arc<Mutex<Tracker>>, dur: Duration) {
-    let mut expireds: Vec<String> = vec![];
-
-    loop {
-        let mut tracker = tracker.lock().await;
-        for expired in &expireds {
-            tracker.remove(expired);
-        }
-
-        expireds = vec![];
-
-        // TODO: Fix this fixed sleep
-        std::thread::sleep(dur);
-
-        for (hash_key, (store, time_created)) in tracker.iter() {
-            if time_created.elapsed() > dur {
-                match store {
-                    Clipboard::Mem(_) => {
-                        panic!(
-                            "{}",
-                            StoreError::NotImplemented("clear expired mem clipboard".to_string())
-                                .to_string()
-                        );
-                    }
-                    Clipboard::Persist(_) => {
-                        if let Err(err) = super::persist::rm_clipboard_file(hash_key) {
-                            panic!(
-                                "failed to remove expired clipboard file: {}",
-                                err.to_string()
-                            );
-                        }
-
-                        expireds.push(hash_key.clone());
-                    }
-                }
-            }
-        }
     }
 }

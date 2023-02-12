@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer};
 
 /// Data represents clipboard data as bytes.
 /// Valid strings (&str and String) can be deserialized into Data.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Data(#[serde(deserialize_with = "string_or_bytes")] pub Vec<u8>);
 
 impl AsRef<[u8]> for Data {

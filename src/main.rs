@@ -1,8 +1,7 @@
 use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use std::time::Duration;
 
 mod html;
 mod store;
@@ -10,7 +9,7 @@ mod store;
 use store::clipboard::Clipboard;
 use store::data::Data;
 use store::error::StoreError;
-use store::tracker;
+use store::tracker::{countdown_remove, Tracker};
 
 #[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
 struct ReqForm {
@@ -50,7 +49,7 @@ async fn landing_page() -> HttpResponse {
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
 async fn post_drop<F, J>(
     req: web::Either<web::Form<F>, web::Json<J>>,
-    tx: web::Data<mpsc::Sender<(String, Clipboard)>>,
+    tracker: web::Data<Tracker>,
 ) -> HttpResponse
 where
     F: Into<Clipboard>,
@@ -80,24 +79,28 @@ where
     // hash will be truncated to string of length 4, and used as clipboard key.
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
+    // Get storage type key
+    let key = clipboard.key();
 
-    if clipboard.save_clipboard(&hash).is_err() {
+    let tracker = tracker.into_inner();
+    if let Err(err) = tracker.store_new_clipboard(&hash, clipboard) {
+        eprintln!("error storing clipboard {}: {}", hash, err.to_string());
         return HttpResponse::InternalServerError()
             .content_type("text/html")
             .body(html::wrap_html("<p>Error: cannot save clipboard</p>"));
     }
 
+    actix_rt::spawn(countdown_remove(
+        tracker,
+        hash.clone(),
+        Duration::from_secs(10),
+    ));
+
     let body = format!(
         r#"<p>Clipboard with hash <code>{1}</code> created</p>
         <p>The clipboard is now available at path <a href="/drop/{0}/{1}"><code>/drop/{0}/{1}</code></a></p>"#,
-        clipboard.key(),
-        hash,
+        key, hash,
     );
-
-    let tx = tx.into_inner();
-    if let Err(err) = tx.send((hash.to_string(), clipboard)).await {
-        panic!("failed to send to tx: {}", err.to_string());
-    };
 
     HttpResponse::Created()
         .content_type("text/html")
@@ -107,7 +110,7 @@ where
 /// get_drop retrieves and returns the clipboard based on its storage and ID as per post_drop.
 #[get("/drop/{store}/{id}")]
 async fn get_drop(path: web::Path<(String, String)>) -> HttpResponse {
-    let (store, id) = path.into_inner();
+    let (ref store, ref id) = path.into_inner();
     let mut clipboard = Clipboard::new(&store);
 
     match clipboard.read_clipboard(&id) {
@@ -161,29 +164,19 @@ async fn serve_css() -> HttpResponse {
 }
 
 #[actix_web::main]
+#[cfg(unix)]
 async fn main() {
     // Ensure that ./${DIR} is a directory
     store::persist::assert_dir();
 
-    let (tx, rx) = mpsc::channel::<(String, Clipboard)>(16);
-
-    let tracker = Mutex::new(tracker::Tracker::new());
-    let tracker1 = Arc::new(tracker);
-    let tracker2 = tracker1.clone();
-
     // This thread sleeps for dur and then checks if any
     // item in tracker has expired. If so, it removes it from tracker
     let dur = std::time::Duration::from_secs(30);
-    tokio::spawn(async move {
-        tracker::clear_expired_clipboards(tracker1, dur).await;
-    });
-
-    // This thread loops forever and adds new item to tracker
-    tokio::spawn(async move { tracker::loop_add_tracker(rx, tracker2) });
 
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(tx.clone()))
+            .app_data(web::Data::new(dur))
+            .app_data(web::Data::new(Tracker::new()))
             .route("/", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
             .route("/drop", web::get().to(landing_page))
