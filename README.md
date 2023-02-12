@@ -14,27 +14,16 @@ And I want to try Rust anyway, so here it is.
 
 ### Current
 
-For now, actix-drop just writes received clipboard text to a file named after
-the first 4 characters of its hexadecimal SHA256 hash.
+actix-drop writes text to file or in-memory clipboard store, with a timer. The clipboard
+is later accessed by referencing the first 4 characters of hex-encoded representation of 
+its SHA2 hash.
 
-For now, the files stay forever, and there's
-no user separation/authentication. For secure usage, host it behind a VPN or
-uses proxy like NGINX to request HTTP Basic Authentication.
+For security reason, host it behind a firewall and VPN, or use modern reverse proxy 
+like NGINX to enable HTTP Basic Authentication.
 
 ### Planned (not yet implemented)
 
-For better flexibility, file upload, JSON response, and plain text response are planned.
-
-After the clipboard is received, a timer will be set for the file, and it will be
-remove after some time. Hashing may also be made less deterministic, although this
-might come quite late.
-
-In addition to persisent file storage, I'd like to add in-memory store for using 
-actix-drop with sensitive data as well. The in-memory store would be treated just like
-the file: it will be subjected to timeout and other future security features.
-
-And last, I plan to write some basic configuration for actix-drop. The configuration
-might include toggling file storage, the storage directory, and the timeout for file deletion
+Configuration, file upload (probably with multiform), JSON and plaintext HTTP response, and TCP support.
 
 ## Running actix-drop
 
