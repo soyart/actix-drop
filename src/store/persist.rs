@@ -1,7 +1,7 @@
-use super::error::StoreError;
-
 use std::env;
 use std::path::Path;
+
+use super::error::StoreError;
 
 // Default hard-coded storage directory.
 pub const DIR: &str = "drop";

@@ -1,7 +1,8 @@
+use std::time::Duration;
+
 use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
 
 mod html;
 mod store;
