@@ -34,10 +34,12 @@ impl Tracker {
         let entry = handle.get(&hash.to_string());
 
         if let Some(&Some(ref clipboard)) = entry {
-            // Clipboard::Persist
-            return Some(clipboard.clone());
+            // Some(Some) = Clipboard::Mem
+            // Return the clipboard in the Tracker
+            return Some(clipboard.to_owned());
         } else if entry.is_some() {
-            // Clipboard::Mem
+            // Some(None) = Clipboard::Mem
+            // Create and return new clipboard constructed from data in the file
             let mut clipboard = Clipboard::Persist(vec![].into());
             if let Err(err) = clipboard.read_clipboard(hash) {
                 eprintln!("error reading file {}: {}", err.to_string(), hash);
@@ -47,6 +49,7 @@ impl Tracker {
             return Some(clipboard);
         }
 
+        // None(None) = neither in file or Tracker
         None
     }
 }
