@@ -4,11 +4,12 @@ use actix_web::{get, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-mod html;
+mod resp;
 mod store;
 
 use store::clipboard::Clipboard;
 use store::data::Data;
+use store::error;
 use store::tracker::{countdown_remove, Tracker};
 
 const CSS: &str = include_str!("../assets/style.css");
@@ -31,7 +32,7 @@ type ReqJson = Clipboard; // eg: {"mem" = "my_data" }
 async fn landing_page() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html")
-        .body(html::wrap_html(&format!(
+        .body(resp::wrap_html(&format!(
             r#"<form action="/drop" method="post">
             <textarea id="textbox" name="data" rows="5" cols="32"></textarea><br>
             <select id="selection box" name="store">
@@ -65,7 +66,7 @@ where
     if let Err(err) = clipboard.is_implemented() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
-            .body(html::wrap_html(&format!(
+            .body(resp::wrap_html(&format!(
                 "<p>Error: bad clipboard store: {}</p>",
                 err.to_string(),
             )));
@@ -74,7 +75,7 @@ where
     if clipboard.is_empty() {
         return HttpResponse::BadRequest()
             .content_type("text/html")
-            .body(html::wrap_html("<p>Error: blank clipboard sent</p>"));
+            .body(resp::wrap_html("<p>Error: blank clipboard sent</p>"));
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -87,7 +88,7 @@ where
         eprintln!("error storing clipboard {}: {}", hash, err.to_string());
         return HttpResponse::InternalServerError()
             .content_type("text/html")
-            .body(html::wrap_html("<p>Error: cannot save clipboard</p>"));
+            .body(resp::wrap_html("<p>Error: cannot save clipboard</p>"));
     }
 
     actix_rt::spawn(countdown_remove(
@@ -103,7 +104,7 @@ where
 
     HttpResponse::Created()
         .content_type("text/html")
-        .body(html::wrap_html(&body))
+        .body(resp::wrap_html(&body))
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
@@ -119,7 +120,7 @@ async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpR
             if text.is_err() {
                 return HttpResponse::InternalServerError()
                     .content_type("text/html")
-                    .body(html::wrap_html("Error: clipboard is non UTF-8"));
+                    .body(resp::wrap_html("Error: clipboard is non UTF-8"));
             }
 
             body = format!(
@@ -138,7 +139,7 @@ async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpR
         }
     }
     .content_type("text/html")
-    .body(html::wrap_html(&body))
+    .body(resp::wrap_html(&body))
 }
 
 async fn serve_css(css: web::Data<String>) -> HttpResponse {
