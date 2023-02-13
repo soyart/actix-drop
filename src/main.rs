@@ -11,6 +11,8 @@ use store::clipboard::Clipboard;
 use store::data::Data;
 use store::tracker::{countdown_remove, Tracker};
 
+const CSS: &str = include_str!("../assets/style.css");
+
 #[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
 struct ReqForm {
     store: String,
@@ -139,10 +141,10 @@ async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpR
     .body(html::wrap_html(&body))
 }
 
-async fn serve_css() -> HttpResponse {
+async fn serve_css(css: web::Data<String>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/css")
-        .body(html::STYLE)
+        .body(css.into_inner().as_ref().clone())
 }
 
 #[actix_web::main]
@@ -153,11 +155,13 @@ async fn main() {
 
     // This thread sleeps for dur and then checks if any
     // item in tracker has expired. If so, it removes it from tracker
+    // TODO: Use this default value
     let dur = std::time::Duration::from_secs(30);
 
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(dur))
+            .app_data(web::Data::new(String::from(CSS)))
             .app_data(web::Data::new(Tracker::new()))
             .route("/", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
