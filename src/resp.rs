@@ -1,26 +1,37 @@
 use actix_web::{HttpResponse, HttpResponseBuilder};
 use serde_json::json;
 
-use crate::store::error::StoreError;
+use crate::store::error::{public_error, StoreError};
 
-type DropResult = Result<crate::Clipboard, StoreError>;
+type DropResult = Result<Option<crate::Clipboard>, StoreError>;
 
-trait DropResponseHttp {
+pub trait DropResponseHttp: From<DropResult> {
     const CONTENT_TYPE: &'static str;
+
     fn format_err(hash: &str, err: StoreError) -> String;
     fn send_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
     fn post_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
 }
 
-fn extract_error_msg(err: StoreError) -> String {
-    if let Some(public_err) = crate::error::public_error(err) {
-        return public_err.to_string();
-    }
+pub struct ResponseHtml(DropResult);
+pub struct ResponsePlain(DropResult);
+pub struct ResponseJson(DropResult);
 
-    return "private error".to_string();
+macro_rules! impl_from_drop_result {
+    ( $( $t: ident );+ ) => {
+        $(
+            impl From<DropResult> for $t {
+                fn from(result: DropResult) -> $t {
+                    $t(result)
+                }
+            }
+
+        )*
+    }
 }
 
-struct ResponseHtml(DropResult);
+impl_from_drop_result!(ResponseHtml; ResponsePlain; ResponseJson);
+
 impl DropResponseHttp for ResponseHtml {
     const CONTENT_TYPE: &'static str = "text/html";
 
@@ -39,7 +50,7 @@ impl DropResponseHttp for ResponseHtml {
             return builder.body(body);
         }
 
-        let maybe_body = String::from_utf8(self.0.unwrap().to_vec());
+        let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
             let body = wrap_html(&format!("error: {:?}", StoreError::InvalidUtf8(conv_err)));
             return builder.body(body);
@@ -69,7 +80,6 @@ impl DropResponseHttp for ResponseHtml {
     }
 }
 
-struct ResponsePlain(DropResult);
 impl DropResponseHttp for ResponsePlain {
     const CONTENT_TYPE: &'static str = "text/plain; charset=utf-8";
 
@@ -84,9 +94,9 @@ impl DropResponseHttp for ResponsePlain {
             return builder.body(Self::format_err(hash, err));
         }
 
-        let maybe_body = String::from_utf8(self.0.unwrap().to_vec());
+        let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
-            let body = format!("error: {:?}", StoreError::InvalidUtf8(conv_err));
+            let body = json!({ "error": StoreError::InvalidUtf8(conv_err) }).to_string();
             return builder.body(body);
         }
 
@@ -107,7 +117,6 @@ impl DropResponseHttp for ResponsePlain {
     }
 }
 
-struct ResponseJson(DropResult);
 impl DropResponseHttp for ResponseJson {
     const CONTENT_TYPE: &'static str = "application/json";
 
@@ -126,7 +135,7 @@ impl DropResponseHttp for ResponseJson {
             return builder.body(Self::format_err(hash, err));
         }
 
-        let maybe_body = String::from_utf8(self.0.unwrap().to_vec());
+        let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
             let body = serde_json::to_string(&StoreError::InvalidUtf8(conv_err)).unwrap();
             return builder.body(body);
@@ -157,4 +166,12 @@ pub const FOOTER: &str = r#"<footer><p><a href="https://github.com/artnoi43/acti
 
 pub fn wrap_html(s: &str) -> String {
     format!("{}{}{}", HEADER, s, FOOTER)
+}
+
+fn extract_error_msg(err: StoreError) -> String {
+    if let Some(public_err) = public_error(err) {
+        return public_err.to_string();
+    }
+
+    return "private error".to_string();
 }

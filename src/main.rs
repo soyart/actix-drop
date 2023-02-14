@@ -9,7 +9,7 @@ mod store;
 
 use store::clipboard::Clipboard;
 use store::data::Data;
-use store::error;
+use store::error::StoreError;
 use store::tracker::{countdown_remove, Tracker};
 
 const CSS: &str = include_str!("../assets/style.css");
@@ -50,13 +50,14 @@ async fn landing_page() -> HttpResponse {
 /// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
 /// will be used as filename as ID for the clipboard.
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
-async fn post_drop<F, J>(
+async fn post_drop<F, J, R>(
     tracker: web::Data<Tracker>,
     req: web::Either<web::Form<F>, web::Json<J>>,
 ) -> HttpResponse
 where
     F: Into<Clipboard>,
     J: Into<Clipboard>,
+    R: resp::DropResponseHttp,
 {
     let clipboard = match req {
         web::Either::Left(web::Form(form)) => form.into(),
@@ -64,18 +65,12 @@ where
     };
 
     if let Err(err) = clipboard.is_implemented() {
-        return HttpResponse::BadRequest()
-            .content_type("text/html")
-            .body(resp::wrap_html(&format!(
-                "<p>Error: bad clipboard store: {}</p>",
-                err.to_string(),
-            )));
+        return R::from(Result::Err(err)).post_clipboard("", HttpResponse::BadRequest());
     }
 
     if clipboard.is_empty() {
-        return HttpResponse::BadRequest()
-            .content_type("text/html")
-            .body(resp::wrap_html("<p>Error: blank clipboard sent</p>"));
+        return R::from(Result::Err(StoreError::Empty))
+            .post_clipboard("", HttpResponse::BadRequest());
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -86,9 +81,9 @@ where
     let tracker = tracker.into_inner();
     if let Err(err) = tracker.store_new_clipboard(&hash, clipboard) {
         eprintln!("error storing clipboard {}: {}", hash, err.to_string());
-        return HttpResponse::InternalServerError()
-            .content_type("text/html")
-            .body(resp::wrap_html("<p>Error: cannot save clipboard</p>"));
+
+        let resp = R::from(Result::Err(err));
+        return resp.post_clipboard(&hash, HttpResponse::InternalServerError());
     }
 
     actix_rt::spawn(countdown_remove(
@@ -97,14 +92,7 @@ where
         Duration::from_secs(10),
     ));
 
-    let body = format!(
-        r#"<p>Clipboard with hash <code>{hash}</code> created</p>
-        <p>The clipboard is now available at path <a href="/drop/{hash}/"><code>/drop/{hash}/</code></a></p>"#,
-    );
-
-    HttpResponse::Created()
-        .content_type("text/html")
-        .body(resp::wrap_html(&body))
+    R::from(Result::Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
@@ -167,7 +155,10 @@ async fn main() {
             .route("/", web::get().to(landing_page))
             .route("/style.css", web::get().to(serve_css))
             .route("/drop", web::get().to(landing_page))
-            .route("/drop", web::post().to(post_drop::<ReqForm, ReqJson>))
+            .route(
+                "/drop",
+                web::post().to(post_drop::<ReqForm, ReqJson, resp::ResponseHtml>),
+            )
             .service(get_drop)
     });
 
