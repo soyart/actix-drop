@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, HttpResponseBuilder};
 use serde_json::json;
 
+use crate::store::clipboard;
 use crate::store::error::{public_error, StoreError};
 
 type DropResult = Result<Option<crate::Clipboard>, StoreError>;
@@ -8,6 +9,7 @@ type DropResult = Result<Option<crate::Clipboard>, StoreError>;
 pub trait DropResponseHttp: From<DropResult> {
     const CONTENT_TYPE: &'static str;
 
+    fn landing_page() -> HttpResponse;
     fn format_err(hash: &str, err: StoreError) -> String;
     fn send_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
     fn post_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
@@ -35,6 +37,23 @@ impl_from_drop_result!(ResponseHtml; ResponsePlain; ResponseJson);
 impl DropResponseHttp for ResponseHtml {
     const CONTENT_TYPE: &'static str = "text/html";
 
+    fn landing_page() -> HttpResponse {
+        HttpResponse::Ok()
+            .content_type("text/html")
+            .body(wrap_html(&format!(
+                r#"<form action="/drop" method="post">
+            <textarea id="textbox" name="data" rows="5" cols="32"></textarea><br>
+            <select id="selection box" name="store">
+                <option value="{}">In-memory database</option>
+                <option value="{}">Persist to file</option>
+            </select>
+            <button type="submit">Send</button>
+            </form>"#,
+                clipboard::MEM,
+                clipboard::PERSIST,
+            )))
+    }
+
     fn format_err(hash: &str, err: StoreError) -> String {
         format!(
             "<p>Error for clipboard {hash}: {}</p>",
@@ -56,7 +75,13 @@ impl DropResponseHttp for ResponseHtml {
             return builder.body(body);
         }
 
-        builder.body(wrap_html(&maybe_body.unwrap()))
+        let body = format!(
+            r#"<p>Clipboard <code>{hash}</code>:</p>
+            <pre><code>{}</code></pre>"#,
+            maybe_body.unwrap(),
+        );
+
+        builder.body(wrap_html(&body))
     }
 
     fn post_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
@@ -70,7 +95,7 @@ impl DropResponseHttp for ResponseHtml {
         } else {
             body = format!(
                 r#"<p>Clipboard with hash <code>{hash}</code> created</p>
-        <p>The clipboard is now available at path <a href="/drop/{hash}/"><code>/drop/{hash}/</code></a></p>"#
+                <p>The clipboard is now available at path <a href="/drop/{hash}"><code>/drop/{hash}</code></a></p>"#
             );
         }
 
@@ -82,6 +107,12 @@ impl DropResponseHttp for ResponseHtml {
 
 impl DropResponseHttp for ResponsePlain {
     const CONTENT_TYPE: &'static str = "text/plain; charset=utf-8";
+
+    fn landing_page() -> HttpResponse {
+        HttpResponse::Ok()
+            .content_type(Self::CONTENT_TYPE)
+            .body("actix-drop: ok")
+    }
 
     fn format_err(hash: &str, err: StoreError) -> String {
         format!("error for clipboard {hash}: {}", extract_error_msg(err))
@@ -119,6 +150,12 @@ impl DropResponseHttp for ResponsePlain {
 
 impl DropResponseHttp for ResponseJson {
     const CONTENT_TYPE: &'static str = "application/json";
+
+    fn landing_page() -> HttpResponse {
+        HttpResponse::Ok()
+            .content_type(Self::CONTENT_TYPE)
+            .body("actix-drop: ok")
+    }
 
     fn format_err(hash: &str, err: StoreError) -> String {
         json!({

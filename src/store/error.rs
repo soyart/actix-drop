@@ -7,6 +7,9 @@ pub enum StoreError {
     #[error("not implemented")]
     NotImplemented(String),
 
+    #[error("no such clipboard")]
+    NoSuch,
+
     #[error("actix-drop bug")]
     Bug(String),
 

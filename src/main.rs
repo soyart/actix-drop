@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use actix_web::{get, web, App, HttpResponse, HttpServer};
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -28,22 +28,8 @@ impl Into<Clipboard> for ReqForm {
 
 type ReqJson = Clipboard; // eg: {"mem" = "my_data" }
 
-/// Return HTML form for entering text to be saved
-async fn landing_page() -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html")
-        .body(resp::wrap_html(&format!(
-            r#"<form action="/drop" method="post">
-            <textarea id="textbox" name="data" rows="5" cols="32"></textarea><br>
-            <select id="selection box" name="store">
-                <option value="{}">In-memory database</option>
-                <option value="{}">Persist to file</option>
-            </select>
-            <button type="submit">Send</button>
-            </form>"#,
-            store::clipboard::MEM,
-            store::clipboard::PERSIST,
-        )))
+async fn landing<R: resp::DropResponseHttp>() -> HttpResponse {
+    R::landing_page()
 }
 
 /// post_drop receives Clipboard from HTML form (sent by the form in landing_page) or JSON request,
@@ -65,12 +51,11 @@ where
     };
 
     if let Err(err) = clipboard.is_implemented() {
-        return R::from(Result::Err(err)).post_clipboard("", HttpResponse::BadRequest());
+        return R::from(Err(err)).post_clipboard("", HttpResponse::BadRequest());
     }
 
     if clipboard.is_empty() {
-        return R::from(Result::Err(StoreError::Empty))
-            .post_clipboard("", HttpResponse::BadRequest());
+        return R::from(Err(StoreError::Empty)).post_clipboard("", HttpResponse::BadRequest());
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -82,7 +67,7 @@ where
     if let Err(err) = tracker.store_new_clipboard(&hash, clipboard) {
         eprintln!("error storing clipboard {}: {}", hash, err.to_string());
 
-        let resp = R::from(Result::Err(err));
+        let resp = R::from(Err(err));
         return resp.post_clipboard(&hash, HttpResponse::InternalServerError());
     }
 
@@ -92,48 +77,34 @@ where
         Duration::from_secs(10),
     ));
 
-    R::from(Result::Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
+    R::from(Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
-#[get("/drop/{id}/")]
-async fn get_drop(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpResponse {
+async fn get_drop<R: resp::DropResponseHttp>(
+    tracker: web::Data<Tracker>,
+    path: web::Path<String>,
+) -> HttpResponse {
     let id = path.into_inner();
     let tracker = tracker.into_inner();
 
-    let body;
     match tracker.get_clipboard(&id) {
-        Some(clipboard) => {
-            let text = String::from_utf8(clipboard.to_vec());
-            if text.is_err() {
-                return HttpResponse::InternalServerError()
-                    .content_type("text/html")
-                    .body(resp::wrap_html("Error: clipboard is non UTF-8"));
-            }
-
-            body = format!(
-                r#"<p>Clipboard <code>{}</code>:</p>
-                <pre><code>{}</code></pre>"#,
-                id,
-                text.unwrap(),
-            );
-
-            HttpResponse::Ok()
-        }
-
-        None => {
-            body = format!("Error: no such clipboard: <code>{}</code>", id);
-            HttpResponse::NotFound()
-        }
+        Some(clipboard) => R::from(Ok(Some(clipboard))).send_clipboard(&id, HttpResponse::Ok()),
+        None => R::from(Err(StoreError::NoSuch)).send_clipboard(&id, HttpResponse::NotFound()),
     }
-    .content_type("text/html")
-    .body(resp::wrap_html(&body))
 }
 
 async fn serve_css(css: web::Data<String>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/css")
         .body(css.into_inner().as_ref().clone())
+}
+
+fn routes<R: resp::DropResponseHttp + 'static>(prefix: &str) -> actix_web::Scope {
+    web::scope(prefix)
+        .route("/", web::get().to(landing::<R>))
+        .route("/drop/{id}", web::get().to(get_drop::<R>))
+        .route("/drop", web::post().to(post_drop::<ReqForm, ReqJson, R>))
 }
 
 #[actix_web::main]
@@ -152,14 +123,18 @@ async fn main() {
             .app_data(web::Data::new(dur))
             .app_data(web::Data::new(String::from(CSS)))
             .app_data(web::Data::new(Tracker::new()))
-            .route("/", web::get().to(landing_page))
-            .route("/style.css", web::get().to(serve_css))
-            .route("/drop", web::get().to(landing_page))
-            .route(
-                "/drop",
-                web::post().to(post_drop::<ReqForm, ReqJson, resp::ResponseHtml>),
-            )
-            .service(get_drop)
+            .wrap(middleware::NormalizePath::new(
+                // Path "/foo/" becomes "/foo"
+                middleware::TrailingSlash::Trim,
+            ))
+            .wrap(middleware::NormalizePath::new(
+                // Path "/foo//bar" becomes "/foo/bar"
+                middleware::TrailingSlash::MergeOnly,
+            ))
+            .service(web::resource("/style.css").route(web::get().to(serve_css)))
+            .service(routes::<resp::ResponseHtml>("/app"))
+            .service(routes::<resp::ResponsePlain>("/text"))
+            .service(routes::<resp::ResponseJson>("/api"))
     });
 
     let addr = "127.0.0.1:3000";
