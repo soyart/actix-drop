@@ -1,8 +1,12 @@
+pub mod html;
+
 use actix_web::{HttpResponse, HttpResponseBuilder};
 use serde_json::json;
 
 use crate::store::clipboard;
 use crate::store::error::{public_error, StoreError};
+use crate::{para, tag_html};
+use html::wrap_html;
 
 type DropResult = Result<Option<crate::Clipboard>, StoreError>;
 
@@ -65,13 +69,13 @@ impl DropResponseHttp for ResponseHtml {
         builder.content_type(Self::CONTENT_TYPE);
 
         if let Err(err) = self.0 {
-            let body = wrap_html(&Self::format_err(hash, err));
+            let body = html::wrap_html(&Self::format_err(hash, err));
             return builder.body(body);
         }
 
         let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
-            let body = wrap_html(&format!("error: {:?}", StoreError::InvalidUtf8(conv_err)));
+            let body = html::wrap_html(&format!("error: {:?}", StoreError::InvalidUtf8(conv_err)));
             return builder.body(body);
         }
 
@@ -81,7 +85,7 @@ impl DropResponseHttp for ResponseHtml {
             maybe_body.unwrap(),
         );
 
-        builder.body(wrap_html(&body))
+        builder.body(html::wrap_html(&body))
     }
 
     fn post_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
@@ -95,13 +99,13 @@ impl DropResponseHttp for ResponseHtml {
         } else {
             body = format!(
                 r#"<p>Clipboard with hash <code>{hash}</code> created</p>
-                <p>The clipboard is now available at path <a href="/drop/{hash}"><code>/drop/{hash}</code></a></p>"#
+                <p>The clipboard is now available at path <a href="/app/drop/{hash}"><code>/app/drop/{hash}</code></a></p>"#
             );
         }
 
         builder
             .content_type(Self::CONTENT_TYPE)
-            .body(wrap_html(&body))
+            .body(html::wrap_html(&body))
     }
 }
 
@@ -111,7 +115,7 @@ impl DropResponseHttp for ResponsePlain {
     fn landing_page() -> HttpResponse {
         HttpResponse::Ok()
             .content_type(Self::CONTENT_TYPE)
-            .body("actix-drop: ok")
+            .body(para!("actix-drop: ok"))
     }
 
     fn format_err(hash: &str, err: StoreError) -> String {
@@ -127,8 +131,7 @@ impl DropResponseHttp for ResponsePlain {
 
         let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
-            let body = json!({ "error": StoreError::InvalidUtf8(conv_err) }).to_string();
-            return builder.body(body);
+            return builder.body(Self::format_err(hash, StoreError::InvalidUtf8(conv_err)));
         }
 
         let body = maybe_body.unwrap();
@@ -198,14 +201,7 @@ impl DropResponseHttp for ResponseJson {
     }
 }
 
-pub const HEADER: &str = r#"<!DOCTYPE html><html><head><meta name=viewport content="width=device-width, initial-scale=1.0"><meta name=keywords content="actix-drop"><meta name=author content=@artnoi><meta charset=UTF-8><link href=https://artnoi.com/style.css rel=stylesheet><title>actix-drop</title></head><body><h1><a href="/">actix-drop</a></h1>"#;
-pub const FOOTER: &str = r#"<footer><p><a href="https://github.com/artnoi43/actix-drop">Contribute on Github</a></p></footer></body></html>"#;
-
-pub fn wrap_html(s: &str) -> String {
-    format!("{}{}{}", HEADER, s, FOOTER)
-}
-
-fn extract_error_msg(err: StoreError) -> String {
+pub fn extract_error_msg(err: StoreError) -> String {
     if let Some(public_err) = public_error(err) {
         return public_err.to_string();
     }

@@ -2,16 +2,27 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tokio::sync::mpsc;
+
 use super::clipboard::Clipboard;
 use super::error::StoreError;
 use super::persist;
 
 /// Tracker is used to store in-memory actix-drop clipboard
-pub struct Tracker(Mutex<HashMap<Arc<String>, Option<Clipboard>>>);
+pub struct Tracker {
+    // In-memory storage
+    haystack: Mutex<HashMap<String, Option<Clipboard>>>,
+    // The sender is used to send cancel message for the timer
+    #[allow(dead_code)]
+    stoppers: Mutex<HashMap<String, mpsc::Sender<()>>>,
+}
 
 impl Tracker {
     pub fn new() -> Self {
-        Self(Mutex::new(HashMap::new()))
+        Self {
+            haystack: Mutex::new(HashMap::new()),
+            stoppers: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn store_new_clipboard(&self, hash: &str, clipboard: Clipboard) -> Result<(), StoreError> {
@@ -23,14 +34,14 @@ impl Tracker {
             Clipboard::Persist(_) => None,
         };
 
-        let mut handle = self.lock().unwrap();
-        handle.insert(Arc::new(hash.to_string()), to_save);
+        let mut handle = self.haystack.lock().unwrap();
+        handle.insert(hash.to_string(), to_save);
 
         Ok(())
     }
 
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
-        let handle = self.lock().unwrap();
+        let handle = self.haystack.lock().unwrap();
         let entry = handle.get(&hash.to_string());
 
         if let Some(&Some(ref clipboard)) = entry {
@@ -38,7 +49,7 @@ impl Tracker {
             // Return the clipboard in the Tracker
             return Some(clipboard.to_owned());
         } else if entry.is_some() {
-            // Some(None) = Clipboard::Mem
+            // Some(None) = Clipboard::Persist
             // Create and return new clipboard constructed from data in the file
             let mut clipboard = Clipboard::Persist(vec![].into());
             if let Err(err) = clipboard.read_clipboard(hash) {
@@ -61,7 +72,7 @@ pub async fn countdown_remove(
 ) -> Result<(), StoreError> {
     actix_web::rt::time::sleep(dur).await;
 
-    let mut handle = tracker.lock().unwrap();
+    let mut handle = tracker.haystack.lock().unwrap();
     if let Some((_key, clipboard)) = handle.remove_entry(&hash.to_string()) {
         // None = persisted to disk
         if clipboard.is_none() {
@@ -102,21 +113,21 @@ mod tracker_tests {
             .unwrap()
             .expect("fail to spawn f2");
 
-        if !shared_tracker.to_owned().lock().unwrap().is_empty() {
+        if !shared_tracker.haystack.lock().unwrap().is_empty() {
             panic!("tracker not empty after cleared");
         }
     }
 }
 
-impl std::ops::Deref for Tracker {
-    type Target = Mutex<HashMap<Arc<String>, Option<Clipboard>>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for Tracker {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+// impl std::ops::Deref for Tracker {
+//     type Target = Mutex<HashMap<String, Option<Clipboard>>>;
+//     fn deref(&self) -> &Self::Target {
+//         &self.haystack
+//     }
+// }
+//
+// impl std::ops::DerefMut for Tracker {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self.haystack
+//     }
+// }
