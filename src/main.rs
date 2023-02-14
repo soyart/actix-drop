@@ -38,6 +38,7 @@ async fn landing<R: resp::DropResponseHttp>() -> HttpResponse {
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
 async fn post_drop<F, J, R>(
     tracker: web::Data<Tracker>,
+    dur: web::Data<Duration>,
     req: web::Either<web::Form<F>, web::Json<J>>,
 ) -> HttpResponse
 where
@@ -71,10 +72,10 @@ where
         return resp.post_clipboard(&hash, HttpResponse::InternalServerError());
     }
 
-    actix_rt::spawn(countdown_remove(
+    actix_web::rt::spawn(countdown_remove(
         tracker,
         hash.clone(),
-        Duration::from_secs(10),
+        Duration::from_secs(dur.as_secs()),
     ));
 
     R::from(Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
@@ -113,14 +114,9 @@ async fn main() {
     // Ensure that ./${DIR} is a directory
     store::persist::assert_dir();
 
-    // This thread sleeps for dur and then checks if any
-    // item in tracker has expired. If so, it removes it from tracker
-    // TODO: Use this default value
-    let dur = std::time::Duration::from_secs(30);
-
-    let server = HttpServer::new(move || {
+    let server = HttpServer::new(|| {
         App::new()
-            .app_data(web::Data::new(dur))
+            .app_data(web::Data::new(Duration::from_secs(15)))
             .app_data(web::Data::new(String::from(CSS)))
             .app_data(web::Data::new(Tracker::new()))
             .wrap(middleware::NormalizePath::new(
