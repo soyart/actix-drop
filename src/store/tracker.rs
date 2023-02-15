@@ -10,9 +10,15 @@ use super::persist;
 
 /// Tracker is used to store in-memory actix-drop clipboard
 pub struct Tracker {
-    // In-memory storage
+    /// In-memory clipboard storage
+    /// If a clipboard is `Clipboard::Mem`, its hash gets inserted
+    /// as map key with value `Some(_)`
+    /// If a clipboard is `Clipboard::Persist`, its hash gets inserted
+    /// as map key with value `None`
     haystack: Mutex<HashMap<String, Option<Clipboard>>>,
-    // The sender is used to send cancel message for the timer
+
+    /// The sender is used to send one-shot cancel message for the launched timer.
+    /// A key in `haystack` will always have a corresponding entry in stoppers.
     stoppers: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
@@ -24,10 +30,12 @@ impl Tracker {
         }
     }
 
-    // store_new_clipboard stores new clipboard in tracker. With each clipboard, a thread with timer will be launched
-    // in the background to expire it. If a new clipboard comes and it 4-byte hash matches the
-    // existing one, the previous clipboard timer thread is forced to return, and a new timer for
-    // the new clipboard takes its place.
+    // store_new_clipboard stores new clipboard in tracker.
+    // With each clipboard, a timer task will be dispatched
+    // to the background to expire it (see `async fn expire_timer`).
+    // If a new clipboard comes in with identical 4-byte hash,
+    // the previous clipboard timer thread is forced to return,
+    // and a the new clipboard with its own timer takes its place.
     pub fn store_new_clipboard(
         tracker: Arc<Self>,
         hash: &str,
@@ -74,6 +82,7 @@ impl Tracker {
         Ok(())
     }
 
+    /// get_clipboard gets a clipboard whose entry key matches `hash`.
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
         let mut handle = self.haystack.lock().expect("failed to lock haystack");
         let entry = handle.get(hash);
@@ -112,7 +121,12 @@ impl Tracker {
     }
 }
 
-pub async fn expire_timer(
+/// expire_timer waits on 2 futures:
+/// 1. the timer
+/// 2. the abort signal
+/// If the timer finishes first, expire_timer removes the entry from `tracker.haystack`.
+/// If the abort signal comes first, expire_timer simply returns `Ok(())`.
+async fn expire_timer(
     tracker: Arc<Tracker>,
     abort: oneshot::Receiver<()>,
     hash: String,
