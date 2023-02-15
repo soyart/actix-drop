@@ -19,6 +19,8 @@ pub struct Tracker {
 
     /// The sender is used to send one-shot cancel message for the launched timer.
     /// A key in `haystack` will always have a corresponding entry in stoppers.
+    /// `stoppers` exist as a separate structure to `haystack` so that we can remove
+    /// items (the clipboard and the sender) independently of each other.
     stoppers: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
@@ -30,12 +32,12 @@ impl Tracker {
         }
     }
 
-    // store_new_clipboard stores new clipboard in tracker.
-    // With each clipboard, a timer task will be dispatched
-    // to the background to expire it (see `async fn expire_timer`).
-    // If a new clipboard comes in with identical 4-byte hash,
-    // the previous clipboard timer thread is forced to return,
-    // and a the new clipboard with its own timer takes its place.
+    /// store_new_clipboard stores new clipboard in tracker.
+    /// With each clipboard, a timer task will be dispatched
+    /// to the background to expire it (see `async fn expire_timer`).
+    /// If a new clipboard comes in with identical 4-byte hash,
+    /// the previous clipboard timer thread is forced to return,
+    /// and a the new clipboard with its own timer takes its place.
     pub fn store_new_clipboard(
         tracker: Arc<Self>,
         hash: &str,
@@ -64,8 +66,8 @@ impl Tracker {
             .expect("failed to lock haystack")
             .insert(hash.to_owned(), to_save);
 
+        // Create a one-shot channel for aborting the spawned timer below
         let (tx, rx) = oneshot::channel();
-
         tracker
             .stoppers
             .lock()
@@ -111,8 +113,9 @@ impl Tracker {
         }
     }
 
-    // Get stopper removed the Sender from self.stoppers, and the caller can use the value
-    // to send cancellaton signal to the closure waiting on corresponding timer.
+    /// get_stopper removes and returns the `Sender` from self.stoppers,
+    /// so that caller can use the `Sender` to send abortion signal to the
+    /// expire_timer closure waiting on corresponding timer.
     pub fn get_stopper(&self, hash: &str) -> Option<oneshot::Sender<()>> {
         self.stoppers
             .lock()
