@@ -8,8 +8,8 @@ const DIR: &'static str = "./drop";
 
 pub fn assert_dir(conf_dir: Option<String>) {
     let dir = match conf_dir {
-        None => DIR.to_string(),
-        Some(d) => d,
+        Some(d) if !d.is_empty() => d,
+        _ => DIR.to_string(),
     };
 
     let create_dir = |d| {

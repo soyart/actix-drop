@@ -6,7 +6,7 @@ const HTTP_ADDR: &'static str = "127.0.0.1";
 const HTTP_PORT: u16 = 8080;
 const TIMEOUT: u64 = 15;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct AppConfig {
     pub dir: Option<String>,
     pub http_addr: Option<String>,

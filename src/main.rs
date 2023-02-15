@@ -15,9 +15,14 @@ use store::data::Data;
 use store::error::StoreError;
 use store::tracker::Tracker;
 
+// Load CSS at compile time
 const CSS: &str = include_str!("../assets/style.css");
 
-#[derive(Deserialize)] // eg: {"store": "mem", "persist": "my_data"}
+/// `ReqForm` is used to mirror `Clipboard`
+/// so that our HTML form deserialization is straightforward.
+/// `ReqForm` in JSON looks like this: `{"store": "mem", "data": "my_data"}`
+/// while `Clipboard` looks like this: `{"mem": "my_data"}`
+#[derive(Deserialize)]
 struct ReqForm {
     store: String,
     data: Data,
@@ -28,8 +33,6 @@ impl Into<Clipboard> for ReqForm {
         Clipboard::new_with_data(&self.store, self.data)
     }
 }
-
-type ReqJson = Clipboard; // eg: {"mem" = "my_data" }
 
 async fn landing<R: resp::DropResponseHttp>() -> HttpResponse {
     R::landing_page()
@@ -87,12 +90,16 @@ async fn get_drop<R: resp::DropResponseHttp>(
     tracker: web::Data<Tracker>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let id = path.into_inner();
+    let hash = path.into_inner();
     let tracker = tracker.into_inner();
 
-    match tracker.get_clipboard(&id) {
-        Some(clipboard) => R::from(Ok(Some(clipboard))).send_clipboard(&id, HttpResponse::Ok()),
-        None => R::from(Err(StoreError::NoSuch)).send_clipboard(&id, HttpResponse::NotFound()),
+    match tracker.get_clipboard(&hash) {
+        Some(clipboard) => {
+            R::from(Ok(Some(clipboard))).send_clipboard(&hash, HttpResponse::Ok())
+        }
+        None => {
+            R::from(Err(StoreError::NoSuch)).send_clipboard(&hash, HttpResponse::NotFound())
+        }
     }
 }
 
@@ -106,18 +113,17 @@ fn routes<R: resp::DropResponseHttp + 'static>(prefix: &str) -> actix_web::Scope
     web::scope(prefix)
         .route("/", web::get().to(landing::<R>))
         .route("/drop/{id}", web::get().to(get_drop::<R>))
-        .route("/drop", web::post().to(post_drop::<ReqForm, ReqJson, R>))
+        .route("/drop", web::post().to(post_drop::<ReqForm, Clipboard, R>))
 }
 
 #[actix_web::main]
 #[cfg(unix)]
 async fn main() {
     let conf = AppConfig::init();
-    println!("{}", "Starting actix-drop".green());
     println!(
-        "{}\n{}",
-        "Current configuration".yellow(),
-        serde_json::to_string(&conf).unwrap().yellow()
+        "\n{}\n{}\n",
+        "Starting actix-drop: current configuration".yellow(),
+        serde_json::to_string(&conf).unwrap()
     );
 
     // Ensure that ./${DIR} is a directory
@@ -125,22 +131,35 @@ async fn main() {
 
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(Duration::from_secs(conf.timeout.unwrap())))
-            .app_data(web::Data::new(String::from(CSS)))
-            .app_data(web::Data::new(Tracker::new()))
             .wrap(middleware::NormalizePath::new(
                 middleware::TrailingSlash::Trim,
             ))
             .wrap(middleware::NormalizePath::new(
                 middleware::TrailingSlash::MergeOnly,
             ))
+            .app_data(web::Data::new(Duration::from_secs(
+                conf.timeout.expect("timeout is None"),
+            )))
+            .app_data(web::Data::new(String::from(CSS)))
+            .app_data(web::Data::new(Tracker::new()))
             .service(web::resource("/style.css").route(web::get().to(serve_css)))
             .service(routes::<resp::ResponseHtml>("/app"))
             .service(routes::<resp::ResponseJson>("/api"))
-            .service(routes::<resp::ResponsePlain>("/text"))
+            .service(routes::<resp::ResponseText>("/txt"))
     });
 
-    let http_addr = format!("{}:{}", conf.http_addr.unwrap(), conf.http_port.unwrap());
+    let http_addr = format!(
+        "{}:{}",
+        conf.http_addr.expect("http_addr is None"),
+        conf.http_port.expect("http_port is None")
+    );
+
+    println!(
+        "{} {}",
+        "Listening on".yellow(),
+        format!("http://{}", http_addr).cyan()
+    );
+
     server
         .bind(http_addr)
         .expect(&"error binding server to address".red())

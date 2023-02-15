@@ -38,7 +38,7 @@ impl Tracker {
         if let Some(stopper) = tracker.get_stopper(&hash) {
             // Recevier might have been dropped
             if let Err(_) = stopper.send(()) {
-                eprintln!("store_new_clipboard: failed to remove timer for {hash}");
+                eprintln!("store_new_clipboard: failed to remove old timer for {hash}");
             }
         }
 
@@ -50,14 +50,21 @@ impl Tracker {
             Clipboard::Persist(_) => None,
         };
 
-        let mut handle = tracker.haystack.lock().unwrap();
-        handle.insert(hash.to_owned(), to_save);
+        tracker
+            .haystack
+            .lock()
+            .expect("failed to lock haystack")
+            .insert(hash.to_owned(), to_save);
 
         let (tx, rx) = oneshot::channel();
-        let mut handle = tracker.stoppers.lock().unwrap();
-        handle.insert(hash.to_owned(), tx);
 
-        tokio::task::spawn(countdown_remove(
+        tracker
+            .stoppers
+            .lock()
+            .expect("failed to lock stoppers")
+            .insert(hash.to_owned(), tx);
+
+        tokio::task::spawn(expire_timer(
             tracker.clone(),
             rx,
             hash.to_owned(),
@@ -68,47 +75,57 @@ impl Tracker {
     }
 
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
-        let handle = self.haystack.lock().unwrap();
+        let mut handle = self.haystack.lock().expect("failed to lock haystack");
         let entry = handle.get(&hash.to_string());
 
-        if let Some(&Some(ref clipboard)) = entry {
-            // Some(Some) = Clipboard::Mem
-            // Return the clipboard in the Tracker
-            return Some(clipboard.to_owned());
-        } else if entry.is_some() {
-            // Some(None) = Clipboard::Persist
-            // Create and return new clipboard constructed from data in the file
-            let mut clipboard = Clipboard::Persist(vec![].into());
-            if let Err(err) = clipboard.read_clipboard(hash) {
-                eprintln!("error reading file {}: {}", err.to_string(), hash);
-                return None;
+        match entry {
+            // Clipboard::Mem
+            Some(&Some(ref clipboard)) => {
+                return Some(clipboard.to_owned());
             }
 
-            return Some(clipboard);
-        }
+            // Clipboard::Persist
+            Some(None) => {
+                let mut clipboard = Clipboard::Persist(vec![].into());
+                // If we could not read the file, remove it from haystack
+                if let Err(err) = clipboard.read_clipboard(hash) {
+                    eprintln!("error reading file {}: {}", err.to_string(), hash);
 
-        // None(None) = neither in file or Tracker
-        None
+                    handle.remove(hash);
+                    return None;
+                }
+
+                Some(clipboard)
+            }
+
+            None => None,
+        }
     }
 
     // Get stopper removed the Sender from self.stoppers, and the caller can use the value
     // to send cancellaton signal to the closure waiting on corresponding timer.
     pub fn get_stopper(&self, hash: &str) -> Option<oneshot::Sender<()>> {
-        self.stoppers.lock().unwrap().remove(&hash.to_owned())
+        self.stoppers
+            .lock()
+            .expect("failed to lock stoppers")
+            .remove(&hash.to_owned())
     }
 }
 
-pub async fn countdown_remove(
+pub async fn expire_timer(
     tracker: Arc<Tracker>,
-    cancel: oneshot::Receiver<()>,
+    abort: oneshot::Receiver<()>,
     hash: String,
     dur: Duration,
 ) -> Result<(), StoreError> {
     tokio::select! {
         // Set a timer to remove clipboard once it expires
         _ = tokio::time::sleep(dur) => {
-        let mut handle = tracker.haystack.lock().unwrap();
-        if let Some((_key, clipboard)) = handle.remove_entry(&hash.to_string()) {
+        if let Some((_key, clipboard)) = tracker.haystack
+                .lock()
+                .expect("failed to lock haystack")
+                .remove_entry(&hash.to_string())
+        {
             // Some(_, None) => clipboard persisted to disk
             if clipboard.is_none() {
                 persist::rm_clipboard_file(hash)?;
@@ -117,7 +134,7 @@ pub async fn countdown_remove(
 
     }
         // If we get cancellation signal, return from this function
-        _ = cancel => {
+        _ = abort => {
             println!("countdown_remove: timer for {hash} extended for {dur:?}");
         }
     }
@@ -149,8 +166,8 @@ mod tracker_tests {
 
         let (_, r1) = oneshot::channel();
         let (_, r2) = oneshot::channel();
-        let f1 = countdown_remove(tracker.clone(), r1, foo.to_string(), dur);
-        let f2 = countdown_remove(tracker.clone(), r2, bar.to_string(), dur);
+        let f1 = expire_timer(tracker.clone(), r1, foo.to_string(), dur);
+        let f2 = expire_timer(tracker.clone(), r2, bar.to_string(), dur);
 
         let rt = actix_web::rt::Runtime::new().unwrap();
 

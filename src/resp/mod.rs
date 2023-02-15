@@ -20,7 +20,7 @@ pub trait DropResponseHttp: From<DropResult> {
 }
 
 pub struct ResponseHtml(DropResult);
-pub struct ResponsePlain(DropResult);
+pub struct ResponseText(DropResult);
 pub struct ResponseJson(DropResult);
 
 macro_rules! impl_from_drop_result {
@@ -37,7 +37,7 @@ macro_rules! impl_from_drop_result {
 }
 
 // Impl From<DropResult> for ResponseHtml, ResponsePlain, ResponseJson
-impl_from_drop_result!(ResponseHtml; ResponsePlain; ResponseJson);
+impl_from_drop_result!(ResponseHtml; ResponseText; ResponseJson);
 
 impl DropResponseHttp for ResponseHtml {
     const CONTENT_TYPE: &'static str = "text/html";
@@ -110,7 +110,7 @@ impl DropResponseHttp for ResponseHtml {
     }
 }
 
-impl DropResponseHttp for ResponsePlain {
+impl DropResponseHttp for ResponseText {
     const CONTENT_TYPE: &'static str = "text/plain; charset=utf-8";
 
     fn landing_page() -> HttpResponse {
