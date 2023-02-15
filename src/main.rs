@@ -58,11 +58,11 @@ where
     };
 
     if let Err(err) = clipboard.is_implemented() {
-        return R::from(Err(err)).post_clipboard("", HttpResponse::BadRequest());
+        return R::from(Err(err)).post_clipboard(HttpResponse::BadRequest(), "");
     }
 
     if clipboard.is_empty() {
-        return R::from(Err(StoreError::Empty)).post_clipboard("", HttpResponse::BadRequest());
+        return R::from(Err(StoreError::Empty)).post_clipboard(HttpResponse::BadRequest(), "");
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -79,10 +79,10 @@ where
         eprintln!("error storing clipboard {}: {}", hash, err.to_string());
 
         let resp = R::from(Err(err));
-        return resp.post_clipboard(&hash, HttpResponse::InternalServerError());
+        return resp.post_clipboard(HttpResponse::InternalServerError(), &hash);
     }
 
-    R::from(Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
+    R::from(Ok(None)).post_clipboard(HttpResponse::Ok(), &hash)
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
@@ -95,10 +95,10 @@ async fn get_drop<R: resp::DropResponseHttp>(
 
     match tracker.get_clipboard(&hash) {
         Some(clipboard) => {
-            R::from(Ok(Some(clipboard))).send_clipboard(&hash, HttpResponse::Ok())
+            R::from(Ok(Some(clipboard))).send_clipboard(HttpResponse::Ok(), &hash)
         }
         None => {
-            R::from(Err(StoreError::NoSuch)).send_clipboard(&hash, HttpResponse::NotFound())
+            R::from(Err(StoreError::NoSuch)).send_clipboard(HttpResponse::NotFound(), &hash)
         }
     }
 }

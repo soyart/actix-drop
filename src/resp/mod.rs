@@ -15,8 +15,8 @@ pub trait DropResponseHttp: From<DropResult> {
 
     fn landing_page() -> HttpResponse;
     fn format_err(hash: &str, err: StoreError) -> String;
-    fn send_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
-    fn post_clipboard(self, hash: &str, builder: HttpResponseBuilder) -> HttpResponse;
+    fn send_clipboard(self, builder: HttpResponseBuilder, hash: &str) -> HttpResponse;
+    fn post_clipboard(self, builder: HttpResponseBuilder, hash: &str) -> HttpResponse;
 }
 
 pub struct ResponseHtml(DropResult);
@@ -66,7 +66,7 @@ impl DropResponseHttp for ResponseHtml {
         )
     }
 
-    fn send_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         builder.content_type(Self::CONTENT_TYPE);
 
         if let Err(err) = self.0 {
@@ -76,7 +76,8 @@ impl DropResponseHttp for ResponseHtml {
 
         let maybe_body = String::from_utf8(self.0.unwrap().unwrap().to_vec());
         if let Err(conv_err) = maybe_body {
-            let body = html::wrap_html(&format!("error: {:?}", StoreError::InvalidUtf8(conv_err)));
+            let body =
+                html::wrap_html(&format!("error: {:?}", StoreError::InvalidUtf8(conv_err)));
             return builder.body(body);
         }
 
@@ -89,7 +90,7 @@ impl DropResponseHttp for ResponseHtml {
         builder.body(html::wrap_html(&body))
     }
 
-    fn post_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         let body;
 
         if let Err(err) = self.0 {
@@ -123,7 +124,7 @@ impl DropResponseHttp for ResponseText {
         format!("error for clipboard {hash}: {}", extract_error_msg(err))
     }
 
-    fn send_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         builder.content_type(Self::CONTENT_TYPE);
 
         if let Err(err) = self.0 {
@@ -139,7 +140,7 @@ impl DropResponseHttp for ResponseText {
         builder.body(body)
     }
 
-    fn post_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         let body;
 
         if let Err(err) = self.0 {
@@ -169,7 +170,7 @@ impl DropResponseHttp for ResponseJson {
         .to_string()
     }
 
-    fn send_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         builder.content_type(Self::CONTENT_TYPE);
 
         if let Err(err) = self.0 {
@@ -186,7 +187,7 @@ impl DropResponseHttp for ResponseJson {
         builder.body(body)
     }
 
-    fn post_clipboard(self, hash: &str, mut builder: HttpResponseBuilder) -> HttpResponse {
+    fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
         let body;
         if let Err(err) = self.0 {
             body = Self::format_err(hash, err);
