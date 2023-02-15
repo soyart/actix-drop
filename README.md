@@ -31,8 +31,3 @@ like NGINX to enable HTTP Basic Authentication.
 
 Expandable hash keys using trie nodes for clipboard hashes, AES or RSA encryption,
 file upload (probably with multiform), and TCP support
-
-## Running actix-drop
-
-By default, actix-drop listens on `localhost` port 3000.
-It will use `./drop` as its storage.
