@@ -76,7 +76,7 @@ impl Tracker {
 
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
         let mut handle = self.haystack.lock().expect("failed to lock haystack");
-        let entry = handle.get(&hash.to_string());
+        let entry = handle.get(hash);
 
         match entry {
             // Clipboard::Mem
@@ -124,7 +124,7 @@ pub async fn expire_timer(
         if let Some((_key, clipboard)) = tracker.haystack
                 .lock()
                 .expect("failed to lock haystack")
-                .remove_entry(&hash.to_string())
+                .remove_entry(&hash)
         {
             // Some(_, None) => clipboard persisted to disk
             if clipboard.is_none() {
