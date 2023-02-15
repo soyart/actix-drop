@@ -1,12 +1,15 @@
 use std::time::Duration;
 
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
+use colored::Colorize;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+mod config; // actix-drop config, not extern crate `config`
 mod resp;
 mod store;
 
+use crate::config::AppConfig;
 use store::clipboard::Clipboard;
 use store::data::Data;
 use store::error::StoreError;
@@ -109,12 +112,20 @@ fn routes<R: resp::DropResponseHttp + 'static>(prefix: &str) -> actix_web::Scope
 #[actix_web::main]
 #[cfg(unix)]
 async fn main() {
-    // Ensure that ./${DIR} is a directory
-    store::persist::assert_dir();
+    let conf = AppConfig::init();
+    println!("{}", "Starting actix-drop".green());
+    println!(
+        "{}\n{}",
+        "Current configuration".yellow(),
+        serde_json::to_string(&conf).unwrap().yellow()
+    );
 
-    let server = HttpServer::new(|| {
+    // Ensure that ./${DIR} is a directory
+    store::persist::assert_dir(conf.dir);
+
+    let server = HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(Duration::from_secs(15)))
+            .app_data(web::Data::new(Duration::from_secs(conf.timeout.unwrap())))
             .app_data(web::Data::new(String::from(CSS)))
             .app_data(web::Data::new(Tracker::new()))
             .wrap(middleware::NormalizePath::new(
@@ -129,12 +140,11 @@ async fn main() {
             .service(routes::<resp::ResponsePlain>("/text"))
     });
 
-    let addr = "127.0.0.1:3000";
-    println!("actix-drop listening on {}...", addr);
+    let http_addr = format!("{}:{}", conf.http_addr.unwrap(), conf.http_port.unwrap());
     server
-        .bind(addr)
-        .expect(&format!("error binding server to {addr}"))
+        .bind(http_addr)
+        .expect(&"error binding server to address".red())
         .run()
         .await
-        .expect("error running server");
+        .expect(&"error running server".red());
 }

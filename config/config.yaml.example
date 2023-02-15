@@ -1,0 +1,4 @@
+dir: "./drop"
+http_addr: 127.0.0.1
+http_port: 8080
+timeout: 15

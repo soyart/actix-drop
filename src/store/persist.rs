@@ -1,19 +1,24 @@
 use std::env;
 use std::path::Path;
 
-use super::error::StoreError;
+use crate::store::error::StoreError;
 
 // Default hard-coded storage directory.
-const DIR: &'static str = "drop";
+const DIR: &'static str = "./drop";
 
-pub fn assert_dir() {
-    let create_dir = |dir| {
-        std::fs::create_dir(dir).expect("failed to create storage directory");
+pub fn assert_dir(conf_dir: Option<String>) {
+    let dir = match conf_dir {
+        None => DIR.to_string(),
+        Some(d) => d,
     };
 
-    match dir_exists(DIR) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => create_dir(DIR),
-        Ok(false) => create_dir(DIR),
+    let create_dir = |d| {
+        std::fs::create_dir(d).expect("failed to create storage directory");
+    };
+
+    match dir_exists(&dir) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => create_dir(dir),
+        Ok(false) => create_dir(dir),
 
         Err(err) => {
             panic!("bad directory: {}", err.to_string());
