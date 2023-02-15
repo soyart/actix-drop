@@ -88,8 +88,8 @@ impl Tracker {
 
     /// get_clipboard gets a clipboard whose entry key matches `hash`.
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
-        let mut handle = self.haystack.lock().expect("failed to lock haystack");
-        let entry = handle.get(hash);
+        let mut haystack = self.haystack.lock().expect("failed to lock haystack");
+        let entry = haystack.get(hash);
 
         match entry {
             // Clipboard::Mem
@@ -102,7 +102,7 @@ impl Tracker {
                     Err(err) => {
                         eprintln!("error reading file {}: {}", err.to_string(), hash);
 
-                        handle.remove(hash);
+                        haystack.remove(hash);
                         return None;
                     }
 
