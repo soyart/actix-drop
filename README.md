@@ -14,16 +14,17 @@ And I want to try Rust anyway, so here it is.
 
 ### Current
 
-actix-drop writes text to file or in-memory clipboard store, with a timer. The clipboard
-is later accessed by referencing the first 4 characters of hex-encoded representation
-of  its SHA2 hash.
+actix-drop writes text to file or in-memory clipboard store, with a timer.
+The clipboard is later accessed by referencing the first 4 characters of
+hex-encoded representation of its SHA2 hash.
 
 For security reason, host it behind a firewall and VPN, or use modern reverse proxy
 like NGINX to enable HTTP Basic Authentication.
 
 ### Planned (not yet implemented)
 
-Configuration, AES encryption, file upload (probably with multiform), and TCP support
+Configuration, trie nodes for clipboard hashes, AES encryption, file upload
+(probably with multiform), and TCP support
 
 ## Running actix-drop
 
