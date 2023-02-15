@@ -10,7 +10,7 @@ mod store;
 use store::clipboard::Clipboard;
 use store::data::Data;
 use store::error::StoreError;
-use store::tracker::{countdown_remove, Tracker};
+use store::tracker::Tracker;
 
 const CSS: &str = include_str!("../assets/style.css");
 
@@ -64,19 +64,17 @@ where
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
 
-    let tracker = tracker.into_inner();
-    if let Err(err) = tracker.store_new_clipboard(&hash, clipboard) {
+    if let Err(err) = Tracker::store_new_clipboard(
+        tracker.into_inner(),
+        &hash,
+        clipboard,
+        Duration::from(**dur),
+    ) {
         eprintln!("error storing clipboard {}: {}", hash, err.to_string());
 
         let resp = R::from(Err(err));
         return resp.post_clipboard(&hash, HttpResponse::InternalServerError());
     }
-
-    actix_web::rt::spawn(countdown_remove(
-        tracker,
-        hash.clone(),
-        Duration::from_secs(dur.as_secs()),
-    ));
 
     R::from(Ok(None)).post_clipboard(&hash, HttpResponse::Ok())
 }
@@ -120,17 +118,15 @@ async fn main() {
             .app_data(web::Data::new(String::from(CSS)))
             .app_data(web::Data::new(Tracker::new()))
             .wrap(middleware::NormalizePath::new(
-                // Path "/foo/" becomes "/foo"
                 middleware::TrailingSlash::Trim,
             ))
             .wrap(middleware::NormalizePath::new(
-                // Path "/foo//bar" becomes "/foo/bar"
                 middleware::TrailingSlash::MergeOnly,
             ))
             .service(web::resource("/style.css").route(web::get().to(serve_css)))
             .service(routes::<resp::ResponseHtml>("/app"))
-            .service(routes::<resp::ResponsePlain>("/text"))
             .service(routes::<resp::ResponseJson>("/api"))
+            .service(routes::<resp::ResponsePlain>("/text"))
     });
 
     let addr = "127.0.0.1:3000";

@@ -25,7 +25,12 @@ impl Tracker {
         }
     }
 
-    pub fn store_new_clipboard(&self, hash: &str, clipboard: Clipboard) -> Result<(), StoreError> {
+    pub fn store_new_clipboard(
+        tracker: Arc<Self>,
+        hash: &str,
+        clipboard: Clipboard,
+        dur: Duration,
+    ) -> Result<(), StoreError> {
         // Save the clipboard and then add an entry to tracker
         clipboard.save_clipboard(hash)?;
 
@@ -34,7 +39,13 @@ impl Tracker {
             Clipboard::Persist(_) => None,
         };
 
-        let mut handle = self.haystack.lock().unwrap();
+        actix_web::rt::spawn(countdown_remove(
+            tracker.clone(),
+            hash.to_owned(),
+            Duration::from_secs(dur.as_secs()),
+        ));
+
+        let mut handle = tracker.haystack.lock().unwrap();
         handle.insert(hash.to_string(), to_save);
 
         Ok(())
@@ -74,7 +85,7 @@ pub async fn countdown_remove(
 
     let mut handle = tracker.haystack.lock().unwrap();
     if let Some((_key, clipboard)) = handle.remove_entry(&hash.to_string()) {
-        // None = persisted to disk
+        // Some(_, None) => clipboard persisted to disk
         if clipboard.is_none() {
             persist::rm_clipboard_file(hash)?;
         }
@@ -92,19 +103,21 @@ mod tracker_tests {
         let bar = "bar";
         let hashes = vec![foo, bar];
 
-        let tracker = Tracker::new();
-        for h in hashes {
-            tracker
-                .store_new_clipboard(&h, Clipboard::Persist("eiei".as_bytes().into()))
-                .expect("failed to insert into tracker");
+        let tracker = Arc::new(Tracker::new());
+        let dur = Duration::from_secs(1);
+        for hash in hashes {
+            Tracker::store_new_clipboard(
+                tracker.clone(),
+                &hash,
+                Clipboard::Persist("eiei".as_bytes().into()),
+                dur,
+            )
+            .expect("failed to insert into tracker");
         }
 
-        let dur = Duration::from_secs(1);
-        let shared_tracker = Arc::new(tracker);
-
         let rt = actix_web::rt::Runtime::new().unwrap();
-        let f1 = countdown_remove(shared_tracker.clone(), foo.to_string(), dur);
-        let f2 = countdown_remove(shared_tracker.clone(), bar.to_string(), dur);
+        let f1 = countdown_remove(tracker.clone(), foo.to_string(), dur);
+        let f2 = countdown_remove(tracker.clone(), bar.to_string(), dur);
 
         rt.block_on(rt.spawn(f1))
             .unwrap()
@@ -113,7 +126,7 @@ mod tracker_tests {
             .unwrap()
             .expect("fail to spawn f2");
 
-        if !shared_tracker.haystack.lock().unwrap().is_empty() {
+        if !tracker.haystack.lock().unwrap().is_empty() {
             panic!("tracker not empty after cleared");
         }
     }

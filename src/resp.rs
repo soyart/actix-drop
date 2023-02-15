@@ -36,6 +36,7 @@ macro_rules! impl_from_drop_result {
     }
 }
 
+// Impl From<DropResult> for ResponseHtml, ResponsePlain, ResponseJson
 impl_from_drop_result!(ResponseHtml; ResponsePlain; ResponseJson);
 
 impl DropResponseHttp for ResponseHtml {
