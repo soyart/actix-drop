@@ -19,8 +19,7 @@ pub struct Tracker {
 
     /// The sender is used to send one-shot cancel message for the launched timer.
     /// A key in `haystack` will always have a corresponding entry in stoppers.
-    /// `stoppers` exist as a separate structure to `haystack` so that we can remove
-    /// items (the clipboard and the sender) independently of each other.
+    /// Field `stoppers` was added later than haystack and will ultimately be merged into haystack.
     stoppers: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
@@ -52,12 +51,15 @@ impl Tracker {
             }
         }
 
-        // Save the clipboard and then add an entry to tracker
-        clipboard.save_clipboard(hash)?;
-
         let to_save = match clipboard.clone() {
             clip @ Clipboard::Mem(_) => Some(clip),
-            Clipboard::Persist(_) => None,
+
+            // Clipboard::Persist data does not have to live in tracker
+            Clipboard::Persist(data) => {
+                persist::write_clipboard_file(hash, data.as_ref())?;
+
+                None
+            }
         };
 
         tracker
@@ -91,22 +93,21 @@ impl Tracker {
 
         match entry {
             // Clipboard::Mem
-            Some(&Some(ref clipboard)) => {
-                return Some(clipboard.to_owned());
-            }
+            Some(&Some(ref clipboard)) => Some(clipboard.to_owned()),
 
             // Clipboard::Persist
             Some(None) => {
-                let mut clipboard = Clipboard::Persist(vec![].into());
                 // If we could not read the file, remove it from haystack
-                if let Err(err) = clipboard.read_clipboard(hash) {
-                    eprintln!("error reading file {}: {}", err.to_string(), hash);
+                match persist::read_clipboard_file(hash) {
+                    Err(err) => {
+                        eprintln!("error reading file {}: {}", err.to_string(), hash);
 
-                    handle.remove(hash);
-                    return None;
+                        handle.remove(hash);
+                        return None;
+                    }
+
+                    Ok(data) => Some(Clipboard::Persist(data.into())),
                 }
-
-                Some(clipboard)
             }
 
             None => None,

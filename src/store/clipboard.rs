@@ -3,7 +3,6 @@ use serde::Deserialize;
 
 use super::data::Data;
 use super::error::StoreError;
-use super::persist;
 
 pub const MEM: &str = "mem";
 pub const PERSIST: &str = "persist";
@@ -44,32 +43,6 @@ impl Clipboard {
         match self {
             Self::Mem(_) => MEM.to_string(),
             Self::Persist(_) => PERSIST.to_string(),
-        }
-    }
-
-    pub fn save_clipboard(&self, hash: &str) -> Result<(), StoreError> {
-        match self {
-            Self::Persist(data) => persist::write_clipboard_file(hash, data.as_ref()),
-            Self::Mem(_) => Ok(()),
-        }
-    }
-
-    // read_clipboard reads clipboard from source and saves the data to self.
-    // If self is not empty, StoreError::NotImplemented is returned
-    pub fn read_clipboard(&mut self, hash: &str) -> Result<(), StoreError> {
-        if self.is_empty() {
-            match self {
-                Self::Persist(data) => {
-                    data.0 = persist::read_clipboard_file(hash)?;
-                    Ok(())
-                }
-
-                Self::Mem(_) => Err(StoreError::NotImplemented("read from mem".to_string())),
-            }
-        } else {
-            Err(StoreError::Bug(
-                "clipboard not empty before read".to_string(),
-            ))
         }
     }
 }
