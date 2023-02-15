@@ -19,7 +19,6 @@ pub struct Tracker {
 
     /// The sender is used to send one-shot cancel message for the launched timer.
     /// A key in `haystack` will always have a corresponding entry in stoppers.
-    /// Field `stoppers` was added later than haystack and will ultimately be merged into haystack.
     stoppers: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
@@ -57,31 +56,27 @@ impl Tracker {
             // Clipboard::Persist data does not have to live in tracker
             Clipboard::Persist(data) => {
                 persist::write_clipboard_file(hash, data.as_ref())?;
-
                 None
             }
         };
 
-        tracker
-            .haystack
-            .lock()
-            .expect("failed to lock haystack")
-            .insert(hash.to_owned(), to_save);
+        let mut haystack = tracker.haystack.lock().expect("failed to lock haystack");
+        haystack.insert(hash.to_owned(), to_save);
 
         // Create a one-shot channel for aborting the spawned timer below
         let (tx, rx) = oneshot::channel();
-        tracker
-            .stoppers
-            .lock()
-            .expect("failed to lock stoppers")
-            .insert(hash.to_owned(), tx);
+        let mut stoppers = tracker.stoppers.lock().expect("failed to lock stoppers");
+        stoppers.insert(hash.to_owned(), tx);
 
         tokio::task::spawn(expire_timer(
             tracker.clone(),
-            rx,
             hash.to_owned(),
-            Duration::from_secs(dur.as_secs()),
+            dur.clone(),
+            rx,
         ));
+
+        drop(stoppers);
+        drop(haystack);
 
         Ok(())
     }
@@ -100,7 +95,7 @@ impl Tracker {
                 // If we could not read the file, remove it from haystack
                 match persist::read_clipboard_file(hash) {
                     Err(err) => {
-                        eprintln!("error reading file {}: {}", err.to_string(), hash);
+                        eprintln!("error reading file {hash}: {}", err.to_string());
 
                         haystack.remove(hash);
                         return None;
@@ -132,9 +127,9 @@ impl Tracker {
 /// If the abort signal comes first, expire_timer simply returns `Ok(())`.
 async fn expire_timer(
     tracker: Arc<Tracker>,
-    abort: oneshot::Receiver<()>,
     hash: String,
     dur: Duration,
+    abort: oneshot::Receiver<()>,
 ) -> Result<(), StoreError> {
     tokio::select! {
         // Set a timer to remove clipboard once it expires
@@ -184,8 +179,8 @@ mod tracker_tests {
 
         let (_, r1) = oneshot::channel();
         let (_, r2) = oneshot::channel();
-        let f1 = expire_timer(tracker.clone(), r1, foo.to_string(), dur);
-        let f2 = expire_timer(tracker.clone(), r2, bar.to_string(), dur);
+        let f1 = expire_timer(tracker.clone(), foo.to_string(), dur, r1);
+        let f2 = expire_timer(tracker.clone(), bar.to_string(), dur, r2);
 
         let rt = actix_web::rt::Runtime::new().unwrap();
 
