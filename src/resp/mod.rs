@@ -3,12 +3,12 @@ pub mod html;
 use actix_web::{HttpResponse, HttpResponseBuilder};
 use serde_json::json;
 
-use crate::store::clipboard;
+use crate::store::clipboard::{self, Clipboard};
 use crate::store::error::{public_error, StoreError};
 use crate::{para, tag_html};
 use html::wrap_html;
 
-type DropResult = Result<Option<crate::Clipboard>, StoreError>;
+type DropResult = Result<Option<Clipboard>, StoreError>;
 
 pub trait DropResponseHttp: From<DropResult> {
     const CONTENT_TYPE: &'static str;

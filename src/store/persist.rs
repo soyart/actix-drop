@@ -4,7 +4,7 @@ use std::path::Path;
 use super::error::StoreError;
 
 // Default hard-coded storage directory.
-pub const DIR: &str = "drop";
+const DIR: &'static str = "drop";
 
 pub fn assert_dir() {
     let create_dir = |dir| {

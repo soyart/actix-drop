@@ -133,7 +133,7 @@ async fn main() {
     println!("actix-drop listening on {}...", addr);
     server
         .bind(addr)
-        .expect("error binding server to address")
+        .expect(&format!("error binding server to {addr}"))
         .run()
         .await
         .expect("error running server");
