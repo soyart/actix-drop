@@ -112,6 +112,7 @@ async fn serve_css(css: web::Data<String>) -> HttpResponse {
 fn routes<R: resp::DropResponseHttp + 'static>(prefix: &str) -> actix_web::Scope {
     web::scope(prefix)
         .route("/", web::get().to(landing::<R>))
+        .route("", web::get().to(landing::<R>))
         .route("/drop/{id}", web::get().to(get_drop::<R>))
         .route("/drop", web::post().to(post_drop::<ReqForm, Clipboard, R>))
 }
@@ -131,9 +132,6 @@ async fn main() {
 
     let server = HttpServer::new(move || {
         App::new()
-            .wrap(middleware::NormalizePath::new(
-                middleware::TrailingSlash::Trim,
-            ))
             .wrap(middleware::NormalizePath::new(
                 middleware::TrailingSlash::MergeOnly,
             ))
