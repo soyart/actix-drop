@@ -109,16 +109,18 @@ async fn serve_css(css: web::Data<String>) -> HttpResponse {
         .body(css.into_inner().as_ref().clone())
 }
 
+/// routes setup different routes for each R with prefix `prefix`.
+/// TODO: Test routes availability, and remove duplicate routes at "" and "/"
 fn routes<R: resp::DropResponseHttp + 'static>(prefix: &str) -> actix_web::Scope {
     web::scope(prefix)
-        .route("/", web::get().to(landing::<R>))
         .route("", web::get().to(landing::<R>))
+        .route("/", web::get().to(landing::<R>))
         .route("/drop/{id}", web::get().to(get_drop::<R>))
         .route("/drop", web::post().to(post_drop::<ReqForm, Clipboard, R>))
 }
 
+#[cfg(unix)] // Our code currently uses UNIX file paths
 #[actix_web::main]
-#[cfg(unix)]
 async fn main() {
     let conf = AppConfig::init();
     println!(
@@ -133,7 +135,7 @@ async fn main() {
     let server = HttpServer::new(move || {
         App::new()
             .wrap(middleware::NormalizePath::new(
-                middleware::TrailingSlash::MergeOnly,
+                middleware::TrailingSlash::Trim,
             ))
             .app_data(web::Data::new(Duration::from_secs(
                 conf.timeout.expect("timeout is None"),
