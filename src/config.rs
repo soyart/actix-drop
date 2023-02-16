@@ -38,7 +38,7 @@ impl AppConfig {
 }
 
 fn init_config() -> Result<AppConfig, config::ConfigError> {
-    let conf = config::Config::builder()
+    config::Config::builder()
         .set_default("dir", DIR)?
         .set_default("http_addr", HTTP_ADDR)?
         .set_default("http_port", HTTP_PORT)?
@@ -47,13 +47,8 @@ fn init_config() -> Result<AppConfig, config::ConfigError> {
         .add_source(config::File::with_name("$HOME/.config/actix-drop/config").required(false))
         .add_source(config::File::with_name("$HOME/.actix-drop/config").required(false))
         .add_source(config::Environment::with_prefix("DROP"))
-        .build();
-
-    if let Err(err) = conf {
-        return Err(err);
-    }
-
-    conf.unwrap().try_deserialize::<AppConfig>()
+        .build()?
+        .try_deserialize::<AppConfig>()
 }
 
 #[cfg(test)]
