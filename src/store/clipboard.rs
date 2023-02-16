@@ -1,5 +1,4 @@
 use serde::Deserialize;
-// use std::collections::HashMap;
 
 use super::data::Data;
 use super::error::StoreError;

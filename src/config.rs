@@ -1,4 +1,3 @@
-use config;
 use serde::{Deserialize, Serialize};
 
 const DIR: &'static str = "./drop";

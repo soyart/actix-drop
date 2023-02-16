@@ -1,7 +1,7 @@
 use std::env;
 use std::path::Path;
 
-use crate::store::error::StoreError;
+use super::error::StoreError;
 
 // Default hard-coded storage directory.
 const DIR: &'static str = "./drop";
