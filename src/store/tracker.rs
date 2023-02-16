@@ -10,23 +10,16 @@ use super::persist;
 
 /// Tracker is used to store in-memory actix-drop clipboard
 pub struct Tracker {
-    /// In-memory clipboard storage
-    /// If a clipboard is `Clipboard::Mem`, its hash gets inserted
-    /// as map key with value `Some(_)`
-    /// If a clipboard is `Clipboard::Persist`, its hash gets inserted
-    /// as map key with value `None`
-    haystack: Mutex<HashMap<String, Option<Clipboard>>>,
-
-    /// The sender is used to send one-shot cancel message for the launched timer.
-    /// A key in `haystack` will always have a corresponding entry in stoppers.
-    stoppers: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// If a clipboard is `Clipboard::Mem`, its hash gets inserted as map key with value `Some(_)`
+    /// If a clipboard is `Clipboard::Persist`, its hash gets inserted as map key with value `None`
+    /// The one-shot sender is for aborting the timeout timer
+    haystack: Mutex<HashMap<String, (Option<Clipboard>, oneshot::Sender<()>)>>,
 }
 
 impl Tracker {
     pub fn new() -> Self {
         Self {
             haystack: Mutex::new(HashMap::new()),
-            stoppers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -43,7 +36,7 @@ impl Tracker {
         dur: Duration,
     ) -> Result<(), StoreError> {
         // Drop the old timer thread
-        if let Some(stopper) = tracker.get_stopper(&hash) {
+        if let Some((_, stopper)) = tracker.remove(&hash) {
             // Recevier might have been dropped
             if let Err(_) = stopper.send(()) {
                 eprintln!("store_new_clipboard: failed to remove old timer for {hash}");
@@ -51,23 +44,17 @@ impl Tracker {
         }
 
         let to_save = match clipboard.clone() {
+            // Clipboard::Mem(data) => data will have to live in haystack
             clip @ Clipboard::Mem(_) => Some(clip),
 
-            // Clipboard::Persist data does not have to live in tracker
+            // Clipboard::Persist(data) => data does not have to live in haystack
             Clipboard::Persist(data) => {
                 persist::write_clipboard_file(hash, data.as_ref())?;
                 None
             }
         };
 
-        let mut haystack = tracker.haystack.lock().expect("failed to lock haystack");
-        haystack.insert(hash.to_owned(), to_save);
-
-        // Create a one-shot channel for aborting the spawned timer below
         let (tx, rx) = oneshot::channel();
-        let mut stoppers = tracker.stoppers.lock().expect("failed to lock stoppers");
-        stoppers.insert(hash.to_owned(), tx);
-
         tokio::task::spawn(expire_timer(
             tracker.clone(),
             hash.to_owned(),
@@ -75,28 +62,32 @@ impl Tracker {
             rx,
         ));
 
-        drop(stoppers);
-        drop(haystack);
+        tracker
+            .haystack
+            .lock()
+            .expect("failed to lock haystack")
+            .insert(hash.to_owned(), (to_save, tx));
 
         Ok(())
     }
 
     /// get_clipboard gets a clipboard whose entry key matches `hash`.
+    /// Calling get_clipboard does not move the value out of haystack
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
         let mut haystack = self.haystack.lock().expect("failed to lock haystack");
-        let entry = haystack.get(hash);
 
-        match entry {
+        match haystack.get(hash) {
             // Clipboard::Mem
-            Some(&Some(ref clipboard)) => Some(clipboard.to_owned()),
+            Some(&(Some(ref clipboard), _)) => Some(clipboard.to_owned()),
 
             // Clipboard::Persist
-            Some(None) => {
+            Some(&(None, _)) => {
                 // If we could not read the file, remove it from haystack
                 match persist::read_clipboard_file(hash) {
                     Err(err) => {
                         eprintln!("error reading file {hash}: {}", err.to_string());
 
+                        // Clear dangling persisted clipboard from haystack
                         haystack.remove(hash);
                         return None;
                     }
@@ -109,13 +100,10 @@ impl Tracker {
         }
     }
 
-    /// get_stopper removes and returns the `Sender` from self.stoppers,
-    /// so that caller can use the `Sender` to send abortion signal to the
-    /// expire_timer closure waiting on corresponding timer.
-    pub fn get_stopper(&self, hash: &str) -> Option<oneshot::Sender<()>> {
-        self.stoppers
+    pub fn remove(&self, hash: &str) -> Option<(Option<Clipboard>, oneshot::Sender<()>)> {
+        self.haystack
             .lock()
-            .expect("failed to lock stoppers")
+            .expect("failed to lock haystack")
             .remove(&hash.to_owned())
     }
 }
@@ -134,7 +122,7 @@ async fn expire_timer(
     tokio::select! {
         // Set a timer to remove clipboard once it expires
         _ = tokio::time::sleep(dur) => {
-        if let Some((_key, clipboard)) = tracker.haystack
+        if let Some((_, (clipboard, _))) = tracker.haystack
                 .lock()
                 .expect("failed to lock haystack")
                 .remove_entry(&hash)
@@ -148,7 +136,7 @@ async fn expire_timer(
     }
         // If we get cancellation signal, return from this function
         _ = abort => {
-            println!("countdown_remove: timer for {hash} extended for {dur:?}");
+            println!("expire_timer: timer for {hash} extended for {dur:?}");
         }
     }
 
@@ -159,6 +147,26 @@ async fn expire_timer(
 #[allow(dead_code)] // Bad tests - actix/tokio runtime conflict, will come back later
 mod tracker_tests {
     use super::*;
+
+    #[test]
+    fn test_store_get() {
+        // We should be able to get multiple times
+        let foo = "foo";
+        let clip = Clipboard::Mem("eiei".into());
+        let (tx, _) = oneshot::channel();
+
+        let tracker = Tracker::new();
+        tracker
+            .haystack
+            .lock()
+            .expect("failed to lock haystack")
+            .insert(foo.to_owned(), (Some(clip), tx));
+
+        assert!(tracker.get_clipboard(foo).is_some());
+        assert!(tracker.get_clipboard(foo).is_some());
+        assert!(tracker.get_clipboard(foo).is_some());
+    }
+
     #[test]
     fn test_store_tracker() {
         let foo = "foo";
@@ -171,7 +179,7 @@ mod tracker_tests {
             Tracker::store_new_clipboard(
                 tracker.clone(),
                 &hash,
-                Clipboard::Persist("eiei".as_bytes().into()),
+                Clipboard::Persist("eiei".into()),
                 dur,
             )
             .expect("failed to insert into tracker");
