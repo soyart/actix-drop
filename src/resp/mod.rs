@@ -11,45 +11,52 @@ pub mod http_resp {
     use crate::store::error::{public_error, StoreError};
     use crate::{para, tag_html};
 
+    /// DropResult represents clipboard or error from http_server
+    /// The clipboard is wrapped in `Option` because when posting clipboard,
+    /// the response contains to clipboard (None) but yet there's no error.
     type DropResult = Result<Option<Clipboard>, StoreError>;
 
     /// DropResponseHttp is a trait representing actix-drop HTTP response.
-    pub trait DropResponseHttp: From<DropResult> {
+    pub trait DropResponseHttp: From<(HttpResponseBuilder, DropResult)> {
         // HTTP header Content-Type
         const CONTENT_TYPE: &'static str;
+
         /// landing_page is the default endpoint for R.
         /// It should return some kind of OK status and text,
         /// and for HTML resposnes, it should offer some kind of user input.
         fn landing_page() -> HttpResponse;
+
         /// format_err formats StoreError
         fn format_err(hash: &str, err: StoreError) -> String;
+
         /// send_clipboard returns the response with the clipboard content
         /// self should be Ok(Some(_)), since we are sending the clipboard to clients.
-        fn send_clipboard(self, builder: HttpResponseBuilder, hash: &str) -> HttpResponse;
+        fn send_clipboard(self, hash: &str) -> HttpResponse;
+
         /// post_clipboard returns the response when clipboard is posted to actix-drop
         /// self should be Ok(None), since we are not sending just the acknowledgement.
-        fn post_clipboard(self, builder: HttpResponseBuilder, hash: &str) -> HttpResponse;
+        fn post_clipboard(self, hash: &str) -> HttpResponse;
     }
 
     /// ResponseHtml implements DropResponseHttp for HTML responses
-    pub struct ResponseHtml(DropResult);
+    pub struct ResponseHtml(HttpResponseBuilder, DropResult);
     /// ResponseHtml implements DropResponseHttp for plain text responses
-    pub struct ResponseText(DropResult);
+    pub struct ResponseText(HttpResponseBuilder, DropResult);
     /// ResponseHtml implements DropResponseHttp for JSON text responses
-    pub struct ResponseJson(DropResult);
+    pub struct ResponseJson(HttpResponseBuilder, DropResult);
 
     macro_rules! impl_from_drop_result {
     ( $( $t: ident );+ ) => {
-        $(
-            impl From<DropResult> for $t {
-                fn from(result: DropResult) -> $t {
-                    $t(result)
+            $(
+                impl From<(HttpResponseBuilder, DropResult)> for $t {
+                    fn from(result: (HttpResponseBuilder, DropResult)) -> $t {
+                        $t(result.0, result.1)
+                    }
                 }
-            }
 
-        )*
+            )*
+        }
     }
-}
 
     // Impl From<DropResult> for ResponseHtml, ResponsePlain, ResponseJson
     impl_from_drop_result!(ResponseHtml; ResponseText; ResponseJson);
@@ -81,8 +88,8 @@ pub mod http_resp {
             )
         }
 
-        fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn send_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => Self::format_err(hash, err),
 
                 Ok(Some(ref clipboard)) => match String::from_utf8(clipboard.to_vec()) {
@@ -97,13 +104,13 @@ pub mod http_resp {
                 Ok(None) => panic!("Ok(None) in match arm"),
             };
 
-            builder
+            self.0
                 .content_type(Self::CONTENT_TYPE)
                 .body(html::wrap_html(&body))
         }
 
-        fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn post_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => {
                     format!(
                         "<p>Error saving clipboard {hash}: {}</p>",
@@ -114,14 +121,14 @@ pub mod http_resp {
                 Ok(None) => {
                     format!(
                         r#"<p>Clipboard with hash <code>{hash}</code> created</p>
-                    <p>The clipboard is now available at path <a href="/app/drop/{hash}"><code>/app/drop/{hash}</code></a></p>"#
+                        <p>The clipboard is now available at path <a href="/app/drop/{hash}"><code>/app/drop/{hash}</code></a></p>"#
                     )
                 }
 
                 Ok(Some(_)) => panic!("Ok(Some) in match arm"),
             };
 
-            builder
+            self.0
                 .content_type(Self::CONTENT_TYPE)
                 .body(html::wrap_html(&body))
         }
@@ -140,8 +147,8 @@ pub mod http_resp {
             format!("error for clipboard {hash}: {}", extract_error_msg(err))
         }
 
-        fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn send_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => Self::format_err(hash, err),
                 Ok(Some(clipboard)) => match String::from_utf8(clipboard.to_vec()) {
                     Ok(clip_string) => clip_string,
@@ -151,11 +158,11 @@ pub mod http_resp {
                 Ok(None) => panic!("Ok(None) in match arm"),
             };
 
-            builder.content_type(Self::CONTENT_TYPE).body(body)
+            self.0.content_type(Self::CONTENT_TYPE).body(body)
         }
 
-        fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn post_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => Self::format_err(hash, err),
                 Ok(None) => {
                     format!("clipboard {hash} created and available at /api/drop/{hash}")
@@ -163,7 +170,7 @@ pub mod http_resp {
                 Ok(Some(_)) => panic!("Ok(Some) in match arm"),
             };
 
-            builder.content_type(Self::CONTENT_TYPE).body(body)
+            self.0.content_type(Self::CONTENT_TYPE).body(body)
         }
     }
 
@@ -184,8 +191,8 @@ pub mod http_resp {
             .to_string()
         }
 
-        fn send_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn send_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => Self::format_err(hash, err),
                 Ok(Some(clipboard)) => match String::from_utf8(clipboard.to_vec()) {
                     Ok(clip_string) => clip_string,
@@ -195,11 +202,11 @@ pub mod http_resp {
                 Ok(None) => panic!("Ok(None) in match arm"),
             };
 
-            builder.content_type(Self::CONTENT_TYPE).body(body)
+            self.0.content_type(Self::CONTENT_TYPE).body(body)
         }
 
-        fn post_clipboard(self, mut builder: HttpResponseBuilder, hash: &str) -> HttpResponse {
-            let body = match self.0 {
+        fn post_clipboard(mut self, hash: &str) -> HttpResponse {
+            let body = match self.1 {
                 Err(err) => Self::format_err(hash, err),
                 Ok(None) => json!({
                     "clipboard": hash,
@@ -209,7 +216,7 @@ pub mod http_resp {
                 Ok(Some(_)) => panic!("Ok(Some) in match arm"),
             };
 
-            builder.content_type(Self::CONTENT_TYPE).body(body)
+            self.0.content_type(Self::CONTENT_TYPE).body(body)
         }
     }
 
