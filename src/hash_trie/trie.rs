@@ -1,6 +1,9 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
+
+pub enum SearchMode {
+    Exact,
+    Prefix,
+}
 
 #[derive(Clone, Debug)]
 struct TrieNode<K, V>
@@ -67,7 +70,7 @@ where
         }
     }
 
-    fn predictive(&self) -> Vec<V> {
+    fn predict(&self) -> Vec<V> {
         let children = &mut Vec::new();
         Self::collect_children(self, children);
 
@@ -76,11 +79,6 @@ where
             .filter_map(|child| child.value.clone())
             .collect()
     }
-}
-
-pub enum SearchMode {
-    Exact,
-    Prefix,
 }
 
 #[derive(Clone, Debug)]
@@ -118,17 +116,11 @@ where
         self.root.search(mode, path)
     }
 
-    pub fn predictive(&self, path: &[K]) -> Vec<V> {
-        let target = self.root.search_child(path);
-        let v;
-
-        if target.is_some() {
-            v = target.unwrap().predictive();
-        } else {
-            v = Vec::new();
+    pub fn predict(&self, path: &[K]) -> Option<Vec<V>> {
+        match self.root.search_child(path) {
+            Some(node) => Some(node.predict()),
+            None => None,
         }
-
-        v
     }
 }
 
@@ -165,13 +157,13 @@ mod tests {
         assert_eq!(trie.search(SearchMode::Exact, b"foobar"), true);
 
         // Not working yet
-        let kids = trie.root.predictive();
+        let kids = trie.root.predict();
         println!("kids {:?}, len {}, kids_long: {kids:?}", kids, kids.len());
 
         let f_node = trie.root.search_child(b"f");
-        assert_eq!(f_node.expect("foob node is None").predictive().len(), 3);
+        assert_eq!(f_node.expect("foob node is None").predict().len(), 3);
 
         let foob_node = trie.root.search_child(b"foob");
-        assert_eq!(foob_node.expect("foob node is None").predictive().len(), 2);
+        assert_eq!(foob_node.expect("foob node is None").predict().len(), 2);
     }
 }
