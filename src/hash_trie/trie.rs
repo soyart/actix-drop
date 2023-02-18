@@ -63,7 +63,7 @@ where
         'l: 's,
     {
         results.push(node);
-        for (_, child) in node.children.iter() {
+        for child in node.children.values() {
             Self::collect_children(child, results);
         }
     }
