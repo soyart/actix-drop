@@ -58,7 +58,7 @@ where
         }
     }
 
-    fn collect_children<'a>(node: &'a Self, results: &mut Vec<&'a Self>) {
+    fn collect_children<'s, 'l: 's>(node: &'l Self, results: &mut Vec<&'s Self>) {
         results.push(node);
         for (_, child) in node.children.iter() {
             Self::collect_children(child, results);
