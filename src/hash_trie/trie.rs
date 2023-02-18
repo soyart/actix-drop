@@ -49,13 +49,11 @@ where
     }
 
     fn search(&self, mode: SearchMode, path: &[K]) -> bool {
-        let child = self.search_child(path);
-
-        match mode {
-            SearchMode::Prefix => child.is_some(),
-            SearchMode::Exact => match child {
-                None => false,
-                Some(node) => node.value.is_some(),
+        match self.search_child(path) {
+            None => false,
+            Some(child) => match mode {
+                SearchMode::Prefix => true,
+                SearchMode::Exact => child.value.is_some(),
             },
         }
     }
@@ -119,6 +117,10 @@ where
             None => None,
         }
     }
+
+    pub fn all(&self) -> Vec<V> {
+        self.root.predict()
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +130,9 @@ mod tests {
         use super::*;
         let mut trie: Trie<u8, &str> = Trie::new();
 
+        trie.insert(b"a", "a");
+        trie.insert(b"ab", "ab");
+        trie.insert(b"abc", "abc");
         trie.insert(b"foo", "foo");
         trie.insert(b"foobar", "foobar");
         trie.insert(b"foobar2000", "foobar2000");
@@ -139,6 +144,7 @@ mod tests {
         assert!(trie.search(SearchMode::Prefix, b"fooba"));
         assert!(trie.search(SearchMode::Prefix, b"foobar"));
 
+        assert_eq!(trie.search(SearchMode::Prefix, b"a"), true);
         assert_eq!(trie.search(SearchMode::Prefix, b"f"), true);
         assert_eq!(trie.search(SearchMode::Prefix, b"fo"), true);
         assert_eq!(trie.search(SearchMode::Prefix, b"fa"), false);
@@ -153,12 +159,9 @@ mod tests {
         assert_eq!(trie.search(SearchMode::Exact, b"fooba"), false);
         assert_eq!(trie.search(SearchMode::Exact, b"foobar"), true);
 
-        // Not working yet
-        let kids = trie.root.predict();
-        println!("kids {:?}, len {}, kids_long: {kids:?}", kids, kids.len());
-
-        let f_node = trie.root.search_child(b"f");
-        assert_eq!(f_node.expect("foob node is None").predict().len(), 3);
+        assert_eq!(trie.all().len(), 6);
+        assert_eq!(trie.predict(b"a").expect("a node is None").len(), 3);
+        assert_eq!(trie.predict(b"f").expect("f node is None").len(), 3);
 
         let foob_node = trie.root.search_child(b"foob");
         assert_eq!(foob_node.expect("foob node is None").predict().len(), 2);
