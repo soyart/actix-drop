@@ -1,4 +1,5 @@
 mod config; // actix-drop config, not extern crate `config`
+mod hash_trie;
 mod http_server;
 mod resp;
 mod store;
