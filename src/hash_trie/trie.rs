@@ -53,13 +53,10 @@ where
 
         match mode {
             SearchMode::Prefix => child.is_some(),
-            SearchMode::Exact => {
-                if child.is_none() {
-                    return false;
-                }
-
-                child.unwrap().value.is_some()
-            }
+            SearchMode::Exact => match child {
+                None => false,
+                Some(node) => node.value.is_some(),
+            },
         }
     }
 
