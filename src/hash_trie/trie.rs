@@ -58,17 +58,28 @@ where
         }
     }
 
-    fn collect_children<'s, 'l>(node: &'l Self, results: &mut Vec<&'s Self>)
+    #[rustfmt::skip]
+    fn collect_children<'s, 'l>(
+        node: &'l Self,
+        children: &mut Vec<&'s Self>,
+    )
     where
         'l: 's,
     {
-        results.push(node);
+        children.push(node);
         for child in node.children.values() {
-            Self::collect_children(child, results);
+            Self::collect_children(child, children);
         }
     }
 
-    fn predict(&self) -> Vec<V> {
+    fn predict(&self, path: &[K]) -> Option<Vec<V>> {
+        match self.search_child(path) {
+            Some(node) => Some(node.all()),
+            None => None,
+        }
+    }
+
+    fn all(&self) -> Vec<V> {
         let children = &mut Vec::new();
         Self::collect_children(self, children);
 
@@ -115,14 +126,11 @@ where
     }
 
     pub fn predict(&self, path: &[K]) -> Option<Vec<V>> {
-        match self.root.search_child(path) {
-            Some(node) => Some(node.predict()),
-            None => None,
-        }
+        self.root.predict(path)
     }
 
     pub fn all(&self) -> Vec<V> {
-        self.root.predict()
+        self.root.all()
     }
 }
 
@@ -167,6 +175,6 @@ mod tests {
         assert_eq!(trie.predict(b"f").expect("f node is None").len(), 3);
 
         let foob_node = trie.root.search_child(b"foob");
-        assert_eq!(foob_node.expect("foob node is None").predict().len(), 2);
+        assert_eq!(foob_node.expect("foob node is None").all().len(), 2);
     }
 }
