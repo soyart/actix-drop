@@ -113,6 +113,7 @@ impl Tracker {
 /// 2. the abort signal
 /// If the timer finishes first, expire_timer removes the entry from `tracker.haystack`.
 /// If the abort signal comes first, expire_timer simply returns `Ok(())`.
+#[inline]
 async fn expire_timer(
     tracker: Arc<Tracker>,
     hash: String,

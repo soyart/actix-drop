@@ -3,3 +3,5 @@ pub mod data;
 pub mod error;
 pub mod persist;
 pub mod tracker;
+
+mod hash_trie;

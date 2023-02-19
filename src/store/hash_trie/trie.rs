@@ -20,6 +20,7 @@ where
     K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
     V: Clone + std::fmt::Debug,
 {
+    #[inline]
     fn new() -> Self {
         Self {
             children: HashMap::new(),
@@ -31,6 +32,7 @@ where
         self.children.entry(key).or_insert(child)
     }
 
+    #[inline]
     fn search_child(&self, path: &[K]) -> Option<Self> {
         let mut curr = self;
 
@@ -74,12 +76,12 @@ where
 
     fn predict(&self, path: &[K]) -> Option<Vec<V>> {
         match self.search_child(path) {
-            Some(node) => Some(node.all()),
             None => None,
+            Some(node) => Some(node.all_children()),
         }
     }
 
-    fn all(&self) -> Vec<V> {
+    fn all_children(&self) -> Vec<V> {
         let children = &mut Vec::new();
         Self::collect_children(self, children);
 
@@ -129,8 +131,8 @@ where
         self.root.predict(path)
     }
 
-    pub fn all(&self) -> Vec<V> {
-        self.root.all()
+    pub fn all_children(&self) -> Vec<V> {
+        self.root.all_children()
     }
 }
 
@@ -170,11 +172,14 @@ mod tests {
         assert_eq!(trie.search(SearchMode::Exact, b"fooba"), false);
         assert_eq!(trie.search(SearchMode::Exact, b"foobar"), true);
 
-        assert_eq!(trie.all().len(), 6);
+        assert_eq!(trie.all_children().len(), 6);
         assert_eq!(trie.predict(b"a").expect("a node is None").len(), 3);
         assert_eq!(trie.predict(b"f").expect("f node is None").len(), 3);
 
         let foob_node = trie.root.search_child(b"foob");
-        assert_eq!(foob_node.expect("foob node is None").all().len(), 2);
+        assert_eq!(
+            foob_node.expect("foob node is None").all_children().len(),
+            2
+        );
     }
 }
