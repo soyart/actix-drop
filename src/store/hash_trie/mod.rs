@@ -2,60 +2,132 @@
 
 pub mod trie;
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use trie::{SearchMode, Trie};
+use tokio::sync::oneshot;
 
-pub struct HashTrie {
+use super::clipboard::Clipboard;
+use super::error::StoreError;
+use super::persist;
+use trie::Trie;
+
+pub struct TrieTracker {
     // trie stores hash as a trie tree. Full SHA2 hash is inserted
     // to the trie, and users will need to have at least N bytes of
     // hash prefix (stored in key_lengths) in order to access the values.
-    trie: Mutex<Trie<u8, Vec<u8>>>,
-    // key_lengths maps 4-byte prefix to minimum key needed
-    // to access clipboard of this prefix.
-    key_lengths: Mutex<HashMap<[u8; 4], usize>>,
+    trie: Mutex<Trie<u8, (Option<Clipboard>, oneshot::Sender<()>)>>,
 }
 
-impl HashTrie {
+impl TrieTracker {
+    const MIN_HASH_LEN: usize = 4;
+
     fn new() -> Self {
         Self {
             trie: Trie::new().into(),
-            key_lengths: HashMap::new().into(),
+        }
+    }
+}
+
+fn insert(
+    tracker: Arc<TrieTracker>,
+    hash: &str,
+    clipboard: Clipboard,
+    dur: Duration,
+) -> Result<usize, StoreError> {
+    let mut trie = tracker.trie.lock().unwrap();
+    // curr is the trie node at which we would insert the clipboard
+    let mut curr = trie.as_ref();
+    let mut idx = 0;
+
+    for (i, h) in hash.as_bytes().iter().enumerate() {
+        match curr.search_direct_child(*h) {
+            None => idx = i,
+            Some(child) => {
+                curr = child;
+            }
         }
     }
 
-    /// insert inserts new hash into the trie, returning the index at which
-    /// the hash is unique.
-    fn insert<T: AsRef<[u8]>>(&mut self, hash: T) -> usize {
-        let hash = hash.as_ref();
-        let len = hash.len();
-
-        let mut trie = self.trie.lock().unwrap();
-        trie.insert(hash, hash.to_owned());
-
-        let mut i = 0;
-        let idx = loop {
-            if i == len {
-                break i;
-            }
-
-            if !trie.search(SearchMode::Prefix, &hash[..i]) {
-                break i;
-            }
-
-            i += 1;
-        };
-
-        self.key_lengths.lock().unwrap().insert(
-            hash[..4]
-                .try_into()
-                .expect("failed to convert hash to [u8; 4]"),
-            idx,
-        );
-
-        idx
+    if idx < TrieTracker::MIN_HASH_LEN {
+        idx = TrieTracker::MIN_HASH_LEN;
     }
+
+    let hashu8: &[u8] = hash.as_ref();
+    let hash_len = hash.len();
+
+    // Abort previous timer, and delete persisted file if there's one
+    trie.root
+        .search_child_mut(&hashu8[idx..hash_len - 1])
+        .and_then(|last_child| last_child.remove(hashu8[hash_len - 1].into()))
+        .and_then(|target_child| target_child.value)
+        .map(|value| {
+            // Clipboard::Mem has None stored
+            if value.0.is_none() {
+                persist::rm_clipboard_file(hash)?;
+            }
+
+            Ok::<tokio::sync::oneshot::Sender<()>, StoreError>(value.1)
+        })
+        .transpose()?
+        .map(|aborter| match aborter.send(()) {
+            Err(_) => Err(StoreError::Bug(format!(
+                "failed to abort prev timer: {hash}",
+            ))),
+
+            _ => Ok(()),
+        })
+        .transpose()?;
+
+    let to_save = match clipboard.clone() {
+        // Clipboard::Mem(data) => data will have to live in haystack
+        clip @ Clipboard::Mem(_) => Some(clip),
+
+        // Clipboard::Persist(data) => data does not have to live in haystack
+        Clipboard::Persist(data) => {
+            persist::write_clipboard_file(hash, data.as_ref())?;
+            None
+        }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    tokio::task::spawn(expire_timer(
+        tracker.clone(),
+        hash.to_owned(),
+        dur.clone(),
+        rx,
+    ));
+
+    trie.insert(hash.as_ref(), (to_save, tx));
+
+    // Hash collision
+    Ok(idx)
+}
+
+/// expire_timer waits on 2 futures:
+/// 1. the timer
+/// 2. the abort signal
+/// If the timer finishes first, expire_timer removes the entry from `tracker.haystack`.
+/// If the abort signal comes first, expire_timer simply returns `Ok(())`.
+#[inline]
+pub async fn expire_timer(
+    tracker: Arc<TrieTracker>,
+    hash: String,
+    dur: Duration,
+    abort: oneshot::Receiver<()>,
+) -> Result<(), StoreError> {
+    tokio::select! {
+        // Set a timer to remove clipboard once it expires
+        _ = tokio::time::sleep(dur) => {
+            // Remove entry for hash
+        }
+        // If we get cancellation signal, return from this function
+        _ = abort => {
+            println!("expire_timer: timer for {hash} extended for {dur:?}");
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -63,12 +135,30 @@ mod tests {
     #[test]
     fn test_wrapper() {
         use super::*;
-        let mut w = HashTrie::new();
+        let htrie = Arc::new(TrieTracker::new());
+        let dur = Duration::from_secs(1);
 
-        assert_eq!(w.insert("1234"), 4);
-        assert_eq!(w.insert("2345"), 4);
-        assert_eq!(w.insert("0000"), 4);
-        assert_eq!(w.insert("12345"), 5);
-        assert_eq!(w.insert("123456"), 6);
+        let clip = Clipboard::Mem("foo".into());
+        assert_eq!(
+            insert(htrie.clone(), "____1", clip.clone(), dur).unwrap(),
+            4
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____12", clip.clone(), dur).unwrap(),
+            5
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____123", clip.clone(), dur).unwrap(),
+            6
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____0", clip.clone(), dur).unwrap(),
+            4
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____01", clip.clone(), dur).unwrap(),
+            5
+        );
+        assert_eq!(insert(htrie, "____012", clip.clone(), dur).unwrap(), 6);
     }
 }

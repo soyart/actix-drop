@@ -5,23 +5,20 @@ pub enum SearchMode {
     Prefix,
 }
 
-#[derive(Clone, Debug)]
-struct TrieNode<K, V>
+pub struct TrieNode<K, V>
 where
-    K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
-    V: Clone + std::fmt::Debug,
+    K: Clone + Eq + std::hash::Hash,
 {
-    children: HashMap<K, TrieNode<K, V>>,
-    value: Option<V>,
+    pub children: HashMap<K, TrieNode<K, V>>,
+    pub value: Option<V>,
 }
 
 impl<K, V> TrieNode<K, V>
 where
-    K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
-    V: Clone + std::fmt::Debug,
+    K: Clone + Eq + std::hash::Hash,
 {
     #[inline]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             children: HashMap::new(),
             value: None,
@@ -32,8 +29,35 @@ where
         self.children.entry(key).or_insert(child)
     }
 
+    pub fn remove(&mut self, key: K) -> Option<Self> {
+        self.children.remove(&key)
+    }
+
     #[inline]
-    fn search_child(&self, path: &[K]) -> Option<Self> {
+    pub fn search_direct_child(&self, next: K) -> Option<&Self> {
+        self.children.get(&next)
+    }
+
+    #[inline]
+    pub fn search_child_mut(&mut self, path: &[K]) -> Option<&mut Self> {
+        let mut curr = self;
+
+        for p in path {
+            match curr.children.get_mut(p) {
+                None => {
+                    return None;
+                }
+                Some(next) => {
+                    curr = next;
+                }
+            }
+        }
+
+        Some(curr)
+    }
+
+    #[inline]
+    pub fn search_child(&self, path: &[K]) -> Option<&Self> {
         let mut curr = self;
 
         for p in path {
@@ -47,7 +71,7 @@ where
             }
         }
 
-        Some(curr.to_owned())
+        Some(curr)
     }
 
     fn search(&self, mode: SearchMode, path: &[K]) -> bool {
@@ -74,37 +98,34 @@ where
         }
     }
 
-    fn predict(&self, path: &[K]) -> Option<Vec<V>> {
+    fn predict(&self, path: &[K]) -> Option<Vec<&V>> {
         match self.search_child(path) {
             None => None,
             Some(node) => Some(node.all_children()),
         }
     }
 
-    fn all_children(&self) -> Vec<V> {
+    pub fn all_children(&self) -> Vec<&V> {
         let children = &mut Vec::new();
         Self::collect_children(self, children);
 
         children
             .iter()
-            .filter_map(|child| child.value.clone())
+            .filter_map(|child| child.value.as_ref())
             .collect()
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct Trie<K, V>
 where
-    K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
-    V: Clone + std::fmt::Debug,
+    K: Clone + Eq + std::hash::Hash,
 {
-    root: TrieNode<K, V>,
+    pub root: TrieNode<K, V>,
 }
 
 impl<K, V> Trie<K, V>
 where
-    K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
-    V: Clone + std::fmt::Debug,
+    K: Clone + Eq + std::hash::Hash,
 {
     pub fn new() -> Self {
         Self {
@@ -123,16 +144,29 @@ where
         curr.value = Some(value);
     }
 
+    pub fn search_child(&self, path: &[K]) -> Option<&TrieNode<K, V>> {
+        self.root.search_child(path)
+    }
+
     pub fn search(&self, mode: SearchMode, path: &[K]) -> bool {
         self.root.search(mode, path)
     }
 
-    pub fn predict(&self, path: &[K]) -> Option<Vec<V>> {
+    pub fn predict(&self, path: &[K]) -> Option<Vec<&V>> {
         self.root.predict(path)
     }
 
-    pub fn all_children(&self) -> Vec<V> {
+    pub fn all_children(&self) -> Vec<&V> {
         self.root.all_children()
+    }
+}
+
+impl<K, V> AsRef<TrieNode<K, V>> for Trie<K, V>
+where
+    K: Clone + Eq + std::hash::Hash,
+{
+    fn as_ref(&self) -> &TrieNode<K, V> {
+        &self.root
     }
 }
 
@@ -181,5 +215,14 @@ mod tests {
             foob_node.expect("foob node is None").all_children().len(),
             2
         );
+
+        let foobar2000_node = trie.search_child(b"foobar2000");
+        assert_eq!(
+            foobar2000_node
+                .expect("foobar2000 node is None")
+                .all_children()
+                .len(),
+            1,
+        )
     }
 }
