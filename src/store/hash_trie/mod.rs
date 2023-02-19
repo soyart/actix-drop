@@ -10,12 +10,12 @@ use tokio::sync::oneshot;
 use super::clipboard::Clipboard;
 use super::error::StoreError;
 use super::persist;
-use trie::Trie;
+use trie::{Trie, TrieNode};
 
 pub struct TrieTracker {
-    // trie stores hash as a trie tree. Full SHA2 hash is inserted
-    // to the trie, and users will need to have at least N bytes of
-    // hash prefix (stored in key_lengths) in order to access the values.
+    /// trie stores hash as a trie tree. Full SHA2 hash is inserted
+    /// to the trie, and users will need to have at least N bytes of
+    /// hash prefix (stored in key_lengths) in order to access the values.
     trie: Mutex<Trie<u8, (Option<Clipboard>, oneshot::Sender<()>)>>,
 }
 
@@ -34,32 +34,33 @@ fn insert(
     hash: &str,
     clipboard: Clipboard,
     dur: Duration,
+    // The usize returned is the shortest hash length for which the hash
+    // can still be uniquely accessed.
 ) -> Result<usize, StoreError> {
     let mut trie = tracker.trie.lock().unwrap();
-    // curr is the trie node at which we would insert the clipboard
-    let mut curr = trie.as_ref();
     let mut idx = 0;
 
-    for (i, h) in hash.as_bytes().iter().enumerate() {
-        match curr.search_direct_child(*h) {
-            None => idx = i,
-            Some(child) => {
-                curr = child;
+    // Find the idx return value
+    {
+        let mut curr = trie.as_ref();
+
+        for (i, h) in hash.as_bytes().iter().enumerate() {
+            match curr.search_direct_child(*h) {
+                None => idx = i,
+                Some(child) => {
+                    curr = child;
+                }
             }
+        }
+
+        if idx < TrieTracker::MIN_HASH_LEN {
+            idx = TrieTracker::MIN_HASH_LEN;
         }
     }
 
-    if idx < TrieTracker::MIN_HASH_LEN {
-        idx = TrieTracker::MIN_HASH_LEN;
-    }
-
-    let hashu8: &[u8] = hash.as_ref();
-    let hash_len = hash.len();
-
     // Abort previous timer, and delete persisted file if there's one
     trie.root
-        .search_child_mut(&hashu8[idx..hash_len - 1])
-        .and_then(|last_child| last_child.remove(hashu8[hash_len - 1].into()))
+        .remove(hash.as_ref())
         .and_then(|target_child| target_child.value)
         .map(|value| {
             // Clipboard::Mem has None stored
@@ -93,7 +94,7 @@ fn insert(
     let (tx, rx) = oneshot::channel();
     tokio::task::spawn(expire_timer(
         tracker.clone(),
-        hash.to_owned(),
+        hash.to_owned().into(),
         dur.clone(),
         rx,
     ));
@@ -110,20 +111,41 @@ fn insert(
 /// If the timer finishes first, expire_timer removes the entry from `tracker.haystack`.
 /// If the abort signal comes first, expire_timer simply returns `Ok(())`.
 #[inline]
-pub async fn expire_timer(
+async fn expire_timer(
     tracker: Arc<TrieTracker>,
-    hash: String,
+    hash: Vec<u8>,
     dur: Duration,
     abort: oneshot::Receiver<()>,
 ) -> Result<(), StoreError> {
+    let hash_str = std::str::from_utf8(&hash).unwrap_or("hash is invalid utf-8");
+
     tokio::select! {
         // Set a timer to remove clipboard once it expires
         _ = tokio::time::sleep(dur) => {
-            // Remove entry for hash
+             match tracker.trie.lock().expect("failed to unlock trie").remove(&hash) {
+                Some(TrieNode{
+                    value: Some((None, _sender)),
+                    ..
+                }) => {
+                    // clipboard is None if it's Clipboard::Persist
+                    if let Err(err) = persist::rm_clipboard_file(hash_str) {
+                        println!("error removing clipboard {hash_str} file: {}", err.to_string())
+                    }
+                },
+
+                _ => {
+                    println!(
+                        "expire_timer: timer for {hash_str} ended, but there's no live clipboard",
+                    )
+                },
+            }
         }
+
         // If we get cancellation signal, return from this function
         _ = abort => {
-            println!("expire_timer: timer for {hash} extended for {dur:?}");
+            println!(
+                "expire_timer: timer for {hash_str} extended for {dur:?}",
+            );
         }
     }
 

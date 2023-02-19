@@ -25,17 +25,37 @@ where
         }
     }
 
-    fn insert(&mut self, key: K, child: Self) -> &mut Self {
+    #[inline]
+    pub fn insert(&mut self, key: K, child: Self) -> &mut Self {
         self.children.entry(key).or_insert(child)
     }
 
-    pub fn remove(&mut self, key: K) -> Option<Self> {
-        self.children.remove(&key)
+    #[inline]
+    pub fn search_direct_child(&self, key: K) -> Option<&Self> {
+        self.children.get(&key)
     }
 
     #[inline]
-    pub fn search_direct_child(&self, next: K) -> Option<&Self> {
-        self.children.get(&next)
+    pub fn search_direct_child_mut(&mut self, key: K) -> Option<&mut Self> {
+        self.children.get_mut(&key)
+    }
+
+    #[inline]
+    pub fn search_child(&self, path: &[K]) -> Option<&Self> {
+        let mut curr = self;
+
+        for p in path {
+            match curr.children.get(p) {
+                None => {
+                    return None;
+                }
+                Some(next) => {
+                    curr = next;
+                }
+            }
+        }
+
+        Some(curr)
     }
 
     #[inline]
@@ -57,24 +77,7 @@ where
     }
 
     #[inline]
-    pub fn search_child(&self, path: &[K]) -> Option<&Self> {
-        let mut curr = self;
-
-        for p in path {
-            match curr.children.get(p) {
-                None => {
-                    return None;
-                }
-                Some(next) => {
-                    curr = next;
-                }
-            }
-        }
-
-        Some(curr)
-    }
-
-    fn search(&self, mode: SearchMode, path: &[K]) -> bool {
+    pub fn search(&self, mode: SearchMode, path: &[K]) -> bool {
         match self.search_child(path) {
             None => false,
             Some(child) => match mode {
@@ -84,11 +87,19 @@ where
         }
     }
 
-    #[rustfmt::skip]
-    fn collect_children<'s, 'l>(
-        node: &'l Self,
-        children: &mut Vec<&'s Self>,
-    )
+    #[inline]
+    pub fn remove_direct_child(&mut self, key: K) -> Option<Self> {
+        self.children.remove(&key)
+    }
+
+    #[inline]
+    pub fn remove(&mut self, path: &[K]) -> Option<Self> {
+        let last_idx = path.len() - 1;
+        self.search_child_mut(&path[..last_idx])
+            .and_then(|child| child.children.remove(&path[last_idx]))
+    }
+
+    pub fn collect_children<'s, 'l>(node: &'l Self, children: &mut Vec<&'s Self>)
     where
         'l: 's,
     {
@@ -98,13 +109,15 @@ where
         }
     }
 
-    fn predict(&self, path: &[K]) -> Option<Vec<&V>> {
+    #[inline]
+    pub fn predict(&self, path: &[K]) -> Option<Vec<&V>> {
         match self.search_child(path) {
             None => None,
             Some(node) => Some(node.all_children()),
         }
     }
 
+    #[inline]
     pub fn all_children(&self) -> Vec<&V> {
         let children = &mut Vec::new();
         Self::collect_children(self, children);
@@ -143,22 +156,6 @@ where
 
         curr.value = Some(value);
     }
-
-    pub fn search_child(&self, path: &[K]) -> Option<&TrieNode<K, V>> {
-        self.root.search_child(path)
-    }
-
-    pub fn search(&self, mode: SearchMode, path: &[K]) -> bool {
-        self.root.search(mode, path)
-    }
-
-    pub fn predict(&self, path: &[K]) -> Option<Vec<&V>> {
-        self.root.predict(path)
-    }
-
-    pub fn all_children(&self) -> Vec<&V> {
-        self.root.all_children()
-    }
 }
 
 impl<K, V> AsRef<TrieNode<K, V>> for Trie<K, V>
@@ -167,6 +164,25 @@ where
 {
     fn as_ref(&self) -> &TrieNode<K, V> {
         &self.root
+    }
+}
+
+impl<K, V> std::ops::Deref for Trie<K, V>
+where
+    K: Clone + Eq + std::hash::Hash,
+{
+    type Target = TrieNode<K, V>;
+    fn deref(&self) -> &Self::Target {
+        &self.root
+    }
+}
+
+impl<K, V> std::ops::DerefMut for Trie<K, V>
+where
+    K: Clone + Eq + std::hash::Hash,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.root
     }
 }
 
@@ -223,6 +239,21 @@ mod tests {
                 .all_children()
                 .len(),
             1,
-        )
+        );
+
+        let foobar2000_node = trie.remove(b"foobar2000").expect("foobar2000 node is None");
+        assert_eq!(foobar2000_node.all_children().len(), 1);
+        assert_eq!(foobar2000_node.value, Some("foobar2000"));
+        assert_eq!(trie.all_children().len(), 5);
+        trie.remove(b"abc"); // deletes abc
+        assert_eq!(trie.all_children().len(), 4);
+        trie.remove(b"ab"); // deletes ab
+        assert_eq!(trie.all_children().len(), 3);
+        trie.remove(b"ab"); // deletes ab
+        assert_eq!(trie.all_children().len(), 3);
+        trie.remove(b"f"); // deletes f, fo, foo
+        assert_eq!(trie.all_children().len(), 1);
+        trie.remove(b"a"); // deletes a
+        assert_eq!(trie.all_children().len(), 0);
     }
 }
