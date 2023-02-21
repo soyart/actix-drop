@@ -156,34 +156,52 @@ async fn expire_timer(
 mod tests {
     #[tokio::test]
     async fn test_wrapper() {
-        async {
-            use super::*;
-            let htrie = Arc::new(TrieTracker::new());
-            let dur = Duration::from_secs(1);
+        use super::*;
+        let htrie = Arc::new(TrieTracker::new());
+        let dur = Duration::from_millis(200);
 
-            let clip = Clipboard::Mem("foo".into());
-            assert_eq!(
-                insert(htrie.clone(), "____1", clip.clone(), dur).unwrap(),
-                4
-            );
-            assert_eq!(
-                insert(htrie.clone(), "____12", clip.clone(), dur).unwrap(),
-                5
-            );
-            assert_eq!(
-                insert(htrie.clone(), "____123", clip.clone(), dur).unwrap(),
-                6
-            );
-            assert_eq!(
-                insert(htrie.clone(), "____0", clip.clone(), dur).unwrap(),
-                4
-            );
-            assert_eq!(
-                insert(htrie.clone(), "____01", clip.clone(), dur).unwrap(),
-                5
-            );
-            assert_eq!(insert(htrie, "____012", clip.clone(), dur).unwrap(), 6);
-        }
-        .await
+        let clip = Clipboard::Mem("foo".into());
+        assert_eq!(
+            insert(htrie.clone(), "____1", clip.clone(), dur).expect("failed to insert"),
+            4
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____12", clip.clone(), dur).expect("failed to insert"),
+            5
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____123", clip.clone(), dur).expect("failed to insert"),
+            6
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____0", clip.clone(), dur).expect("failed to insert"),
+            4
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____01", clip.clone(), dur).expect("failed to insert"),
+            5
+        );
+        assert_eq!(
+            insert(htrie.clone(), "____012", clip.clone(), dur).expect("failed to insert"),
+            6
+        );
+
+        // This insertion will last longer than the rest
+        assert_eq!(
+            insert(
+                htrie.clone(),
+                "lingers",
+                clip.clone(),
+                Duration::from_secs(1)
+            )
+            .expect("failed to insert"),
+            6
+        );
+
+        // Wait for clipboards to expire
+        tokio::spawn(tokio::time::sleep(dur)).await.unwrap();
+
+        // Assert that they were all removed except for "lingers"
+        assert_eq!(htrie.trie.lock().unwrap().all_children_values().len(), 1);
     }
 }

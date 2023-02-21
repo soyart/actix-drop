@@ -200,30 +200,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_reset_timer() {
-        async {
-            let hash = "foo";
-            let tracker = Arc::new(Tracker::new());
+        let hash = "foo";
+        let tracker = Arc::new(Tracker::new());
 
-            let clipboard = Clipboard::Mem(vec![1u8, 2, 3].into());
-            let dur200 = Duration::from_millis(200);
-            let dur400 = Duration::from_millis(400);
+        let clipboard = Clipboard::Mem(vec![1u8, 2, 3].into());
+        let dur200 = Duration::from_millis(200);
+        let dur400 = Duration::from_millis(400);
 
-            Tracker::store_new_clipboard(tracker.clone(), hash, clipboard.clone(), dur400)
-                .expect("failed to store to tracker");
+        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard.clone(), dur400)
+            .expect("failed to store to tracker");
 
-            tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
-            Tracker::store_new_clipboard(tracker.clone(), hash, clipboard, dur400)
-                .expect("failed to re-write to tracker");
+        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard, dur400)
+            .expect("failed to re-write to tracker");
 
-            tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
-            assert!(tracker.get_clipboard(hash).is_some());
+        assert!(tracker.get_clipboard(hash).is_some());
 
-            tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
-            assert!(tracker.get_clipboard(hash).is_none());
-        }
-        .await
+        assert!(tracker.get_clipboard(hash).is_none());
     }
 }
