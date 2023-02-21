@@ -30,6 +30,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "soytrie",
  "thiserror",
  "tokio",
 ]
@@ -148,7 +149,7 @@ dependencies = [
 [[package]]
 name = "actix-web"
 version = "4.3.0"
-source = "git+https://github.com/actix/actix-web.git?branch=master#dc08ea044b75a3f21fac632c9ab364cebe1ad61c"
+source = "git+https://github.com/actix/actix-web.git?branch=master#42193bee295ce131f18fbc0d49b7206214717330"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -1091,9 +1092,9 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4614a76b2a8be0058caa9dbbaf66d988527d86d003c11a94fbd335d7661edcef"
+checksum = "6528351c9bc8ab22353f9d776db39a20288e8d6c37ef8cfe3317cf875eecfc2d"
 dependencies = [
  "autocfg",
 ]
@@ -1113,6 +1114,11 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "soytrie"
+version = "0.1.0"
+source = "git+https://github.com/artnoi43/soytrie?branch=main#1d5ffb7b513be0717dc1a43bb2ebeb000609f750"
 
 [[package]]
 name = "syn"
@@ -1198,6 +1204,7 @@ dependencies = [
  "libc",
  "memchr",
  "mio",
+ "num_cpus",
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",

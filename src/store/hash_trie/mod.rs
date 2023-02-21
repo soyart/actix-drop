@@ -1,16 +1,14 @@
 #![allow(dead_code)]
 
-pub mod trie;
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use soytrie::{Trie, TrieNode};
 use tokio::sync::oneshot;
 
 use super::clipboard::Clipboard;
 use super::error::StoreError;
 use super::persist;
-use trie::{Trie, TrieNode};
 
 pub struct TrieTracker {
     /// trie stores hash as a trie tree. Full SHA2 hash is inserted
@@ -40,12 +38,15 @@ fn insert(
     let mut trie = tracker.trie.lock().unwrap();
     let mut idx = 0;
 
-    // Find the idx return value
     {
+        // Find the idx return value
+        //
+        // We don't need mutable reference to the TrieNode because we are only reading
+        // values out of it, although we need `curr` to be mutable so that we can't assign it a new
+        // value. The real deletion is done on `trie`, which is mutable thanks to MutexGuard
         let mut curr = trie.as_ref();
-
         for (i, h) in hash.as_bytes().iter().enumerate() {
-            match curr.search_direct_child(*h) {
+            match curr.get_direct_child(*h) {
                 None => idx = i,
                 Some(child) => {
                     curr = child;
@@ -59,8 +60,7 @@ fn insert(
     }
 
     // Abort previous timer, and delete persisted file if there's one
-    trie.root
-        .remove(hash.as_ref())
+    trie.remove(hash.as_ref())
         .and_then(|target_child| target_child.value)
         .map(|value| {
             // Clipboard::Mem has None stored
@@ -92,14 +92,14 @@ fn insert(
     };
 
     let (tx, rx) = oneshot::channel();
-    tokio::task::spawn(expire_timer(
+    tokio::spawn(expire_timer(
         tracker.clone(),
         hash.to_owned().into(),
         dur.clone(),
         rx,
     ));
 
-    trie.insert(hash.as_ref(), (to_save, tx));
+    trie.insert_value(hash.as_ref(), (to_save, tx));
 
     // Hash collision
     Ok(idx)
@@ -154,33 +154,36 @@ async fn expire_timer(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_wrapper() {
-        use super::*;
-        let htrie = Arc::new(TrieTracker::new());
-        let dur = Duration::from_secs(1);
+    #[tokio::test]
+    async fn test_wrapper() {
+        async {
+            use super::*;
+            let htrie = Arc::new(TrieTracker::new());
+            let dur = Duration::from_secs(1);
 
-        let clip = Clipboard::Mem("foo".into());
-        assert_eq!(
-            insert(htrie.clone(), "____1", clip.clone(), dur).unwrap(),
-            4
-        );
-        assert_eq!(
-            insert(htrie.clone(), "____12", clip.clone(), dur).unwrap(),
-            5
-        );
-        assert_eq!(
-            insert(htrie.clone(), "____123", clip.clone(), dur).unwrap(),
-            6
-        );
-        assert_eq!(
-            insert(htrie.clone(), "____0", clip.clone(), dur).unwrap(),
-            4
-        );
-        assert_eq!(
-            insert(htrie.clone(), "____01", clip.clone(), dur).unwrap(),
-            5
-        );
-        assert_eq!(insert(htrie, "____012", clip.clone(), dur).unwrap(), 6);
+            let clip = Clipboard::Mem("foo".into());
+            assert_eq!(
+                insert(htrie.clone(), "____1", clip.clone(), dur).unwrap(),
+                4
+            );
+            assert_eq!(
+                insert(htrie.clone(), "____12", clip.clone(), dur).unwrap(),
+                5
+            );
+            assert_eq!(
+                insert(htrie.clone(), "____123", clip.clone(), dur).unwrap(),
+                6
+            );
+            assert_eq!(
+                insert(htrie.clone(), "____0", clip.clone(), dur).unwrap(),
+                4
+            );
+            assert_eq!(
+                insert(htrie.clone(), "____01", clip.clone(), dur).unwrap(),
+                5
+            );
+            assert_eq!(insert(htrie, "____012", clip.clone(), dur).unwrap(), 6);
+        }
+        .await
     }
 }

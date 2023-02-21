@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-web = {git = "https://github.com/actix/actix-web.git", branch = "master"}
-tokio = { version = "1", features = ["macros"] }
+soytrie = { git = "https://github.com/artnoi43/soytrie", branch = "main" }
+actix-web = { git = "https://github.com/actix/actix-web.git", branch = "master" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 lazy_static = "1"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
