@@ -1,3 +1,5 @@
+#![feature(is_some_and)]
+
 mod config; // actix-drop config, not extern crate `config`
 mod http_server;
 mod resp;
