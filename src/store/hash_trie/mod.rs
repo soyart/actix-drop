@@ -45,12 +45,10 @@ impl TrieTracker {
             .and_then(|trie| Some(trie.all_valued_children()))
         {
             None => None,
-            Some(children) => {
-                if children.len() > 1 {
-                    return None;
-                }
+            Some(children) if children.len() != 1 => None,
 
-                match children[0].value {
+            Some(child) => {
+                match child[0].value {
                     None => None,
                     // Clipboard::Persist
                     Some((ref hash, None, _)) => match persist::read_clipboard_file(&hash) {
@@ -190,7 +188,6 @@ async fn expire_timer(
     tokio::select! {
         // Expire the clipboard after dur.
         _ = tokio::time::sleep(dur) => {
-                println!("expiring {}", String::from_utf8(hash.clone()).unwrap());
                 match tracker.trie.lock().expect("failed to lock trie").remove(&hash) {
                     Some(TrieNode{
                         value: Some((_, None, _sender)),
@@ -198,7 +195,7 @@ async fn expire_timer(
                     }) => {
                         // clipboard is None if it's Clipboard::Persist
                         if let Err(err) = persist::rm_clipboard_file(hash_str) {
-                            println!("error removing clipboard {hash_str} file: {}", err.to_string())
+                            println!("expire_timer: error removing clipboard {hash_str} file: {}", err.to_string())
                         }
                     },
 
@@ -387,6 +384,6 @@ mod tests {
             .unwrap();
 
         // The clipboard foo must still live.
-        assert_eq!(htrie.trie.lock().unwrap().all_children_values().len(), 1);
+        assert!(htrie.get_clipboard_frag("some_long").is_some());
     }
 }
