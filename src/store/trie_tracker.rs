@@ -50,13 +50,13 @@ impl TrieTracker {
             Some(child) => {
                 match child[0].value {
                     None => None,
+                    // Clipboard::Mem
+                    Some((_, Some(ref mem_clip), _)) => Some(mem_clip.to_owned()),
                     // Clipboard::Persist
                     Some((ref hash, None, _)) => match persist::read_clipboard_file(&hash) {
                         Err(_) => None,
                         Ok(persisted) => Some(Clipboard::Persist(persisted.into())),
                     },
-                    // Clipboard::Mem
-                    Some((_, Some(ref mem_clip), _)) => Some(mem_clip.to_owned()),
                 }
             }
         }
@@ -227,7 +227,6 @@ mod tests {
 
     // Test expiration works
     #[tokio::test]
-    #[ignore]
     async fn expire() {
         let htrie = Arc::new(TrieTracker::new());
 
@@ -296,6 +295,7 @@ mod tests {
             ("abcd1234x", 4),
             ("abcd12345", 9), // We need to go all the way "down" to character '5' to get unique value
             ("abcd00000", 5), // Here we only need 5 characters ("abcd0") to distinguish it from other nodes with "abcd"*
+            ("abcdx0000", 5), // And this entry would need 5 ("abcdx")
         ];
 
         vals.into_iter().enumerate().for_each(|(idx, val)| {
