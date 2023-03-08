@@ -1,9 +1,6 @@
-#![allow(dead_code)]
+use std::sync::Mutex;
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use soytrie::{Trie, TrieNode};
+use soytrie::Trie;
 use tokio::sync::oneshot;
 
 use super::clipboard::Clipboard;
@@ -11,7 +8,7 @@ use super::error::StoreError;
 use super::persist;
 
 // Tracker replacement, with trie from soytrie.
-pub struct TrieTracker {
+pub(super) struct TrieTracker {
     // trie keeps tuple (full_hash, clipboard, aborter) as value
     trie: Mutex<Trie<u8, (String, Option<Clipboard>, oneshot::Sender<()>)>>,
 }
@@ -19,19 +16,40 @@ pub struct TrieTracker {
 impl TrieTracker {
     const MIN_HASH_LEN: usize = 4;
 
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             trie: Trie::new().into(),
         }
     }
 
-    // Reports whether there's only 1 child below frag
-    // Note: is only here for testing
-    fn is_shortest_ref(&self, frag: &str) -> bool {
+    pub fn remove(
+        &self,
+        hash: &str,
+    ) -> Option<(String, Option<Clipboard>, oneshot::Sender<()>)> {
         self.trie
             .lock()
             .expect("failed to lock trie")
-            .predict(frag.as_ref())
+            .remove(hash.as_bytes())
+            .and_then(|node| node.value)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.trie
+            .lock()
+            .expect("failed to lock trie")
+            .all_valued_children()
+            .len()
+            == 0
+    }
+
+    // Reports whether there's only 1 child below frag
+    // Note: is only here for testing
+    #[allow(unused)]
+    pub fn is_shortest_ref(&self, frag: &str) -> bool {
+        self.trie
+            .lock()
+            .expect("failed to lock trie")
+            .predict(frag.as_bytes())
             .is_some_and(|targets| targets.len() == 1)
     }
 
@@ -63,6 +81,7 @@ impl TrieTracker {
     }
 
     // Returns the clipboard at hash (supposedly the end of trie)
+    #[allow(unused)]
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
         self.trie
             .lock()
@@ -85,15 +104,14 @@ impl TrieTracker {
     // aborts the timer previously set and start a new one. It returns the minimum length of hash (frag)
     // required to uniquely access this clipboard. `insert_clipboard` expects that the hashes are of
     // uniform, constant length.
-    fn insert_clipboard(
-        tracker: Arc<TrieTracker>,
+    pub fn insert_clipboard(
+        &self,
         hash: &str,
         clipboard: Clipboard,
-        dur: Duration,
         // The usize returned is the shortest hash length for which the hash
         // can still be uniquely accessed.
-    ) -> Result<usize, StoreError> {
-        let mut trie = tracker.trie.lock().unwrap();
+    ) -> Result<(usize, oneshot::Receiver<()>), StoreError> {
+        let mut trie = self.trie.lock().unwrap();
 
         // Abort previous timer, and delete persisted file if there's one
         trie.remove(hash.as_ref())
@@ -158,136 +176,17 @@ impl TrieTracker {
         };
 
         let (tx, rx) = oneshot::channel();
-        tokio::spawn(expire_timer(
-            tracker.clone(),
-            hash.to_owned().into(),
-            dur.clone(),
-            rx,
-        ));
-
         trie.insert_value(hash.as_ref(), (hash.to_string(), to_save, tx));
 
-        Ok(min_len)
+        Ok((min_len, rx))
     }
-}
-
-/// expire_timer waits on 2 futures:
-/// 1. the timer
-/// 2. the abort signal
-/// If the timer finishes first, expire_timer removes the entry from `tracker.haystack`.
-/// If the abort signal comes first, expire_timer simply returns `Ok(())`.
-#[inline]
-async fn expire_timer(
-    tracker: Arc<TrieTracker>,
-    hash: Vec<u8>,
-    dur: Duration,
-    abort: oneshot::Receiver<()>,
-) -> Result<(), StoreError> {
-    let hash_str = std::str::from_utf8(&hash).unwrap_or("hash is invalid utf-8");
-
-    tokio::select! {
-        // Expire the clipboard after dur.
-        _ = tokio::time::sleep(dur) => {
-                match tracker.trie.lock().expect("failed to lock trie").remove(&hash) {
-                    Some(TrieNode{
-                        value: Some((_, None, _sender)),
-                        ..
-                    }) => {
-                        // clipboard is None if it's Clipboard::Persist
-                        if let Err(err) = persist::rm_clipboard_file(hash_str) {
-                            println!("expire_timer: error removing clipboard {hash_str} file: {}", err.to_string())
-                        }
-                    },
-
-                    // Clipboard::Mem
-                    Some(_) => {}
-
-                    _ => {
-                        println!(
-                            "expire_timer: timer for {hash_str} ended, but there's no live clipboard",
-                        )
-                    },
-               }
-        }
-
-        // If we get cancellation signal, return from this function
-        _ = abort => {
-            println!(
-                "expire_timer: timer for {hash_str} extended for {dur:?}",
-            );
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // Test expiration works
-    #[tokio::test]
-    async fn expire() {
-        let htrie = Arc::new(TrieTracker::new());
-
-        // Expires in 2 secs
-        TrieTracker::insert_clipboard(
-            htrie.clone(),
-            "some_long_ass_key",
-            Clipboard::Mem("foo".into()),
-            Duration::from_secs(2),
-        )
-        .unwrap();
-
-        // Sleep for 1.2 sec
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(1200)))
-            .await
-            .unwrap();
-
-        // It should still be there
-        assert!(htrie.get_clipboard_frag("some_long_ass_key").is_some());
-
-        // But if we sleep some more
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(800)))
-            .await
-            .unwrap();
-
-        // It should have been gone
-        assert!(htrie.get_clipboard_frag("some_long_ass_key").is_none());
-    }
-
-    // manual_test must not panic
-    #[tokio::test]
-    async fn manual_test() {
-        let htrie = Arc::new(TrieTracker::new());
-
-        let vals = vec![("123456", 4), ("1234567", 5), ("12345678", 6)];
-
-        let dur = Duration::from_secs(3);
-        vals.clone().into_iter().for_each(|val| {
-            TrieTracker::insert_clipboard(
-                htrie.clone(),
-                val.0.as_ref(),
-                Clipboard::Mem(val.0.into()),
-                dur,
-            )
-            .expect("failed to insert");
-        });
-
-        let trie = htrie.trie.lock().unwrap();
-        let mut _curr = trie.as_ref();
-        _curr = _curr.get_child(b"1234").unwrap();
-        _curr = _curr.get_child(b"5").unwrap();
-        _curr = _curr.get_child(b"67").unwrap();
-        _curr = _curr.get_child(b"8").unwrap();
-    }
-
     #[tokio::test]
     async fn insert() {
         use super::*;
-        let htrie = Arc::new(TrieTracker::new());
-        let dur = Duration::from_secs(3);
-
         let vals = vec![
             ("123400000", 4), // Accessing this node requires designed minimum length 4
             ("123450000", 5), // Accessing this now requires 5 characters
@@ -298,92 +197,17 @@ mod tests {
             ("abcdx0000", 5), // And this entry would need 5 ("abcdx")
         ];
 
+        let htrie = TrieTracker::new();
         vals.into_iter().enumerate().for_each(|(idx, val)| {
             println!("{} {v}", idx + 1, v = val.0);
             assert_eq!(
-                TrieTracker::insert_clipboard(
-                    htrie.clone(),
-                    val.0.as_ref(),
-                    Clipboard::Mem(val.0.into()),
-                    dur,
-                )
-                .expect("failed to insert {val}"),
-                // Expected return value
+                htrie
+                    .insert_clipboard(val.0.as_ref(), Clipboard::Mem(val.0.into()))
+                    .expect("failed to insert {val}")
+                    .0,
+                // Expected return value (min hash len)
                 val.1,
             );
         });
-    }
-
-    #[tokio::test]
-    async fn e2e() {
-        let htrie = Arc::new(TrieTracker::new());
-
-        let vals = vec![
-            // (path, expected return values from insert_clipboard, final minimum key length)
-            // After all has been inserted, each path should be accessible with length equal to the
-            // last tuple element
-            ("123400000", 4, 5), // Accessing this node requires designed minimum length 4
-            ("123450000", 5, 5), // Accessing this now requires 5 characters
-            ("123456780", 6, 6), // and so on..
-            ("abcd1234x00", 4, 9),
-            ("abcd1234500", 9, 9), // We need to go all the way "down" to character '5' to get unique value
-            ("abcd0000000", 5, 5), // Here we only need 5 characters ("abcd0") to distinguish it from other nodes with "abcd"*
-        ];
-
-        let dur = Duration::from_millis(500);
-        vals.clone().into_iter().enumerate().for_each(|(_i, val)| {
-            TrieTracker::insert_clipboard(
-                htrie.clone(),
-                val.0.as_ref(),
-                Clipboard::Mem(val.0.into()),
-                dur,
-            )
-            .unwrap();
-        });
-
-        vals.clone()
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, _min_len)| {
-                println!("{} {v}", i + 1, v = vals[i].0);
-                assert!(htrie.get_clipboard_frag(&vals[i].0[..=vals[i].2]).is_some());
-            });
-
-        // Wait for clipboards to expire
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(600)))
-            .await
-            .unwrap();
-
-        // All clipboards should have expired
-        assert!(htrie.trie.lock().unwrap().all_children_values().is_empty());
-
-        // Try insert, then re-insert with longer duration,
-        // then sleep for short duration.
-        TrieTracker::insert_clipboard(
-            htrie.clone(),
-            "some_long_ass_key",
-            Clipboard::Mem("foo".into()),
-            Duration::from_millis(500),
-        )
-        .unwrap();
-
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(500)))
-            .await
-            .unwrap();
-
-        TrieTracker::insert_clipboard(
-            htrie.clone(),
-            "some_long_ass_key",
-            Clipboard::Mem("foo".into()),
-            Duration::from_secs(2),
-        )
-        .unwrap();
-
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(200)))
-            .await
-            .unwrap();
-
-        // The clipboard foo must still live.
-        assert!(htrie.get_clipboard_frag("some_long").is_some());
     }
 }

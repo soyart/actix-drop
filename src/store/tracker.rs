@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::oneshot;
@@ -7,20 +6,25 @@ use tokio::sync::oneshot;
 use super::clipboard::Clipboard;
 use super::error::StoreError;
 use super::persist;
+use super::trie_tracker::TrieTracker;
 
 /// Tracker is used to store in-memory actix-drop clipboard
 pub struct Tracker {
     /// If a clipboard is `Clipboard::Mem`, its hash gets inserted as map key with value `Some(_)`
     /// If a clipboard is `Clipboard::Persist`, its hash gets inserted as map key with value `None`
     /// The one-shot sender is for aborting the timeout timer
-    haystack: Mutex<HashMap<String, (Option<Clipboard>, oneshot::Sender<()>)>>,
+    haystack: TrieTracker,
 }
 
 impl Tracker {
     pub fn new() -> Self {
         Self {
-            haystack: Mutex::new(HashMap::new()),
+            haystack: TrieTracker::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.haystack.is_empty()
     }
 
     /// store_new_clipboard stores new clipboard in tracker.
@@ -34,7 +38,7 @@ impl Tracker {
         hash: &str,
         clipboard: Clipboard,
         dur: Duration,
-    ) -> Result<(), StoreError> {
+    ) -> Result<usize, StoreError> {
         // Drop the old timer thread
         if let Some((_, stopper)) = tracker.remove(&hash) {
             // Recevier might have been dropped
@@ -43,19 +47,9 @@ impl Tracker {
             }
         }
 
-        let to_save = match clipboard.clone() {
-            // Clipboard::Mem(data) => data will have to live in haystack
-            clip @ Clipboard::Mem(_) => Some(clip),
+        let (min_len, rx) = tracker.haystack.insert_clipboard(hash, clipboard)?;
 
-            // Clipboard::Persist(data) => data does not have to live in haystack
-            Clipboard::Persist(data) => {
-                persist::write_clipboard_file(hash, data.as_ref())?;
-                None
-            }
-        };
-
-        let (tx, rx) = oneshot::channel();
-        println!("spawing timer");
+        println!("spawing timer for {hash}");
         tokio::task::spawn(expire_timer(
             tracker.clone(),
             hash.to_owned(),
@@ -63,49 +57,19 @@ impl Tracker {
             rx,
         ));
 
-        tracker
-            .haystack
-            .lock()
-            .expect("failed to lock haystack")
-            .insert(hash.to_owned(), (to_save, tx));
-
-        Ok(())
+        Ok(min_len)
     }
 
     /// get_clipboard gets a clipboard whose entry key matches `hash`.
     /// Calling get_clipboard does not move the value out of haystack
     pub fn get_clipboard(&self, hash: &str) -> Option<Clipboard> {
-        let mut haystack = self.haystack.lock().expect("failed to lock haystack");
-
-        match haystack.get(hash) {
-            // Clipboard::Mem
-            Some(&(Some(ref clipboard), _)) => Some(clipboard.to_owned()),
-
-            // Clipboard::Persist
-            Some(&(None, _)) => {
-                // If we could not read the file, remove it from haystack
-                match persist::read_clipboard_file(hash) {
-                    Err(err) => {
-                        eprintln!("error reading file {hash}: {}", err.to_string());
-
-                        // Clear dangling persisted clipboard from haystack
-                        haystack.remove(hash);
-                        return None;
-                    }
-
-                    Ok(data) => Some(Clipboard::Persist(data.into())),
-                }
-            }
-
-            None => None,
-        }
+        self.haystack.get_clipboard_frag(hash)
     }
 
     pub fn remove(&self, hash: &str) -> Option<(Option<Clipboard>, oneshot::Sender<()>)> {
         self.haystack
-            .lock()
-            .expect("failed to lock haystack")
-            .remove(&hash.to_owned())
+            .remove(hash)
+            .and_then(|tuple| Some((tuple.1, tuple.2)))
     }
 }
 
@@ -121,27 +85,32 @@ async fn expire_timer(
     dur: Duration,
     abort: oneshot::Receiver<()>,
 ) -> Result<(), StoreError> {
-    println!("eiei in here");
-
     tokio::select! {
-        // Set a timer to remove clipboard once it expires
+        // Expire the clipboard after dur.
         _ = tokio::time::sleep(dur) => {
-            println!("expiring {hash}");
-            if let Some((_, (clipboard, _))) = tracker.haystack
-                    .lock()
-                    .expect("failed to lock haystack")
-                    .remove_entry(&hash)
-            {
-                // Some(_, None) => clipboard persisted to disk
-                if clipboard.is_none() {
-                    persist::rm_clipboard_file(hash)?;
-                }
-            }
+                match tracker.haystack.remove(&hash) {
+                    Some((_, clipboard, _)) => {
+                        if clipboard.is_none() {
+                            if let Err(err) = persist::rm_clipboard_file(&hash) {
+                                eprintln!("failed to remove persisted clipboard {hash}");
+                                return Err(err)
+                            }
+                        }
+
+                        println!("expiring clipboard {hash}");
+                    },
+
+                    None => {
+                        println!("no live clipboard {hash} to expire");
+                    }
+               }
         }
 
         // If we get cancellation signal, return from this function
         _ = abort => {
-                println!("expire_timer: timer for {hash} extended for {dur:?}");
+            println!(
+                "expire_timer: timer for {hash} extended for {dur:?}",
+            );
         }
     }
 
@@ -152,55 +121,39 @@ async fn expire_timer(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_store_get() {
-        // We should be able to get multiple times
-        let foo = "foo";
-        let clip = Clipboard::Mem("eiei".into());
-        let (tx, _) = oneshot::channel();
+    #[tokio::test]
+    async fn test_store_get() {
+        let t = Arc::new(Tracker::new());
+        let key = "keyfoo";
+        let bad_key = "badkey";
+        let dur = Duration::from_millis(300);
 
-        let tracker = Tracker::new();
-        tracker
-            .haystack
-            .lock()
-            .expect("failed to lock haystack")
-            .insert(foo.to_owned(), (Some(clip), tx));
+        Tracker::store_new_clipboard(t.clone(), key, Clipboard::Mem("foo".into()), dur)
+            .unwrap();
 
-        assert!(tracker.get_clipboard(foo).is_some());
-        assert!(tracker.get_clipboard(foo).is_some());
-        assert!(tracker.get_clipboard(foo).is_some());
+        assert!(t.get_clipboard(key).is_some());
+        assert!(t.get_clipboard(bad_key).is_none());
     }
 
     #[tokio::test]
-    async fn test_store_tracker() {
-        let foo = "foo";
-        let bar = "bar";
-        let hashes = vec![foo, bar];
+    async fn test_store_expire() {
+        let t = Arc::new(Tracker::new());
+        let key = "keyfoo";
+        let dur = Duration::from_millis(300);
 
-        let tracker = Arc::new(Tracker::new());
-        let dur = Duration::from_millis(100);
-        for hash in hashes {
-            Tracker::store_new_clipboard(
-                tracker.clone(),
-                &hash,
-                Clipboard::Mem("eiei".into()),
-                dur,
-            )
-            .expect("failed to insert into tracker");
-        }
-
-        tokio::spawn(tokio::time::sleep(Duration::from_millis(300)))
-            .await
+        // Store and launch the expire timer
+        Tracker::store_new_clipboard(t.clone(), key, Clipboard::Mem("foo".into()), dur)
             .unwrap();
+        // Sleep until expired
+        tokio::spawn(tokio::time::sleep(dur)).await.unwrap();
 
-        if !tracker.haystack.lock().unwrap().is_empty() {
-            panic!("tracker not empty after cleared");
-        }
+        // Clipboard with `key` should have been expired
+        assert!(t.get_clipboard(key).is_none());
     }
 
     #[tokio::test]
     async fn test_reset_timer() {
-        let hash = "foo";
+        let hash = "keyfoo";
         let tracker = Arc::new(Tracker::new());
 
         let clipboard = Clipboard::Mem(vec![1u8, 2, 3].into());
@@ -222,5 +175,78 @@ mod tests {
         tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
         assert!(tracker.get_clipboard(hash).is_none());
+    }
+
+    #[tokio::test]
+    async fn e2e() {
+        let tracker = Arc::new(Tracker::new());
+
+        let vals = vec![
+            // (path, expected return values from insert_clipboard/store_clipboard, final minimum key length)
+            // After all has been inserted, each path should be accessible with length equal to the
+            // last tuple element
+            ("123400000", 4, 5), // Accessing this node requires designed minimum length 4
+            ("123450000", 5, 5), // Accessing this now requires 5 characters
+            ("123456780", 6, 6), // and so on..
+            ("abcd1234x00", 4, 9),
+            ("abcd1234500", 9, 9), // We need to go all the way "down" to character '5' to get unique value
+            ("abcd0000000", 5, 5), // Here we only need 5 characters ("abcd0") to distinguish it from other nodes with "abcd"*
+        ];
+
+        let dur = Duration::from_millis(500);
+        vals.clone().into_iter().enumerate().for_each(|(_i, val)| {
+            Tracker::store_new_clipboard(
+                tracker.clone(),
+                val.0,
+                Clipboard::Mem(val.0.into()),
+                dur,
+            )
+            .unwrap();
+        });
+
+        vals.clone()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, _min_len)| {
+                println!("{} {v}", i + 1, v = vals[i].0);
+                assert!(tracker.get_clipboard(&vals[i].0[..=vals[i].2]).is_some());
+            });
+
+        // Wait for clipboards to expire
+        tokio::spawn(tokio::time::sleep(Duration::from_millis(600)))
+            .await
+            .unwrap();
+
+        // All clipboards should have expired
+        assert!(tracker.is_empty());
+
+        // Try insert, then re-insert with longer duration,
+        // then sleep for short duration.
+        Tracker::store_new_clipboard(
+            tracker.clone(),
+            "some_long_ass_key",
+            Clipboard::Mem("foo".into()),
+            Duration::from_millis(500),
+        )
+        .expect("failed to store new foo clipboard");
+
+        tokio::spawn(tokio::time::sleep(Duration::from_millis(500)))
+            .await
+            .unwrap();
+
+        Tracker::store_new_clipboard(
+            tracker.clone(),
+            "some_long_ass_key",
+            Clipboard::Mem("foo".into()),
+            Duration::from_secs(2),
+        )
+        .expect("failed to store new foo clipboard");
+
+        tokio::spawn(tokio::time::sleep(Duration::from_millis(200)))
+            .await
+            .unwrap();
+
+        // The clipboard foo must still live.
+        assert!(tracker.get_clipboard("some_long").is_some());
     }
 }
