@@ -1118,7 +1118,7 @@ dependencies = [
 [[package]]
 name = "soytrie"
 version = "0.1.0"
-source = "git+https://github.com/artnoi43/soytrie?branch=main#1d5ffb7b513be0717dc1a43bb2ebeb000609f750"
+source = "git+https://github.com/soyart/soytrie?branch=main#12a6d0cced713387133bc76269a75161f2497ce6"
 
 [[package]]
 name = "syn"
