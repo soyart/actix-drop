@@ -35,10 +35,10 @@ impl Tracker {
         clipboard: Clipboard,
         dur: Duration,
     ) -> Result<(), StoreError> {
-        // Drop the old timer thread
-        if let Some((_, stopper)) = tracker.remove(&hash) {
+        // Drop the old timer for the hash key
+        if let Some((_, tx_abort)) = tracker.remove(&hash) {
             // Recevier might have been dropped
-            if let Err(_) = stopper.send(()) {
+            if let Err(_) = tx_abort.send(()) {
                 eprintln!("store_new_clipboard: failed to remove old timer for {hash}");
             }
         }
@@ -54,19 +54,20 @@ impl Tracker {
             }
         };
 
-        let (tx, rx) = oneshot::channel();
+        // Tracker will remember tx_abort to abort the timer in expire_timer.
+        let (tx_abort, rx_abort) = oneshot::channel();
         tokio::task::spawn(expire_timer(
             tracker.clone(),
             hash.to_owned(),
             dur.clone(),
-            rx,
+            rx_abort,
         ));
 
         tracker
             .haystack
             .lock()
             .expect("failed to lock haystack")
-            .insert(hash.to_owned(), (to_save, tx));
+            .insert(hash.to_owned(), (to_save, tx_abort));
 
         Ok(())
     }
@@ -122,18 +123,17 @@ async fn expire_timer(
     tokio::select! {
         // Set a timer to remove clipboard once it expires
         _ = tokio::time::sleep(dur) => {
-        if let Some((_, (clipboard, _))) = tracker.haystack
-                .lock()
-                .expect("failed to lock haystack")
-                .remove_entry(&hash)
-        {
-            // Some(_, None) => clipboard persisted to disk
-            if clipboard.is_none() {
-                persist::rm_clipboard_file(hash)?;
+            if let Some((_, (clipboard, _))) = tracker.haystack
+                    .lock()
+                    .expect("failed to lock haystack")
+                    .remove_entry(&hash)
+            {
+                // Some(_, None) => clipboard persisted to disk
+                if clipboard.is_none() {
+                    persist::rm_clipboard_file(hash)?;
+                }
             }
         }
-
-    }
         // If we get cancellation signal, return from this function
         _ = abort => {
             println!("expire_timer: timer for {hash} extended for {dur:?}");
@@ -167,66 +167,44 @@ mod tracker_tests {
         assert!(tracker.get_clipboard(foo).is_some());
     }
 
-    #[test]
-    fn test_store_tracker() {
-        let foo = "foo";
-        let bar = "bar";
-        let hashes = vec![foo, bar];
+    #[tokio::test]
+    async fn test_store_expire() {
+        let t = Arc::new(Tracker::new());
+        let key = "keyfoo";
+        let dur = Duration::from_millis(300);
 
-        let tracker = Arc::new(Tracker::new());
-        let dur = Duration::from_secs(1);
-        for hash in hashes {
-            Tracker::store_new_clipboard(
-                tracker.clone(),
-                &hash,
-                Clipboard::Persist("eiei".into()),
-                dur,
-            )
-            .expect("failed to insert into tracker");
-        }
+        // Store and launch the expire timer
+        Tracker::store_new_clipboard(t.clone(), key, Clipboard::Mem("foo".into()), dur).unwrap();
+        // Sleep until expired
+        tokio::spawn(tokio::time::sleep(dur)).await.unwrap();
 
-        let (_, r1) = oneshot::channel();
-        let (_, r2) = oneshot::channel();
-        let f1 = expire_timer(tracker.clone(), foo.to_string(), dur, r1);
-        let f2 = expire_timer(tracker.clone(), bar.to_string(), dur, r2);
-
-        let rt = actix_web::rt::Runtime::new().unwrap();
-
-        rt.block_on(actix_web::rt::spawn(f1))
-            .unwrap()
-            .expect("fail to spawn f1");
-        rt.block_on(actix_web::rt::spawn(f2))
-            .unwrap()
-            .expect("fail to spawn f2");
-
-        if !tracker.haystack.lock().unwrap().is_empty() {
-            panic!("tracker not empty after cleared");
-        }
+        // Clipboard with `key` should have been expired
+        assert!(t.get_clipboard(key).is_none());
     }
 
-    #[test]
-    fn test_reset_timer() {
-        let hash = "foo";
+    #[tokio::test]
+    async fn test_reset_timer() {
+        let hash = "keyfoo";
         let tracker = Arc::new(Tracker::new());
 
         let clipboard = Clipboard::Mem(vec![1u8, 2, 3].into());
-        let two_secs = Duration::from_secs(2);
-        let four_secs = Duration::from_secs(4);
+        let dur200 = Duration::from_millis(200);
+        let dur400 = Duration::from_millis(400);
 
-        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard.clone(), four_secs)
+        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard.clone(), dur400)
             .expect("failed to store to tracker");
 
-        let rt = actix_web::rt::Runtime::new().unwrap();
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
-        rt.block_on(rt.spawn(actix_web::rt::time::sleep(two_secs)))
-            .expect("failed to sleep-block");
-
-        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard, four_secs)
+        Tracker::store_new_clipboard(tracker.clone(), hash, clipboard, dur400)
             .expect("failed to re-write to tracker");
 
-        rt.block_on(rt.spawn(actix_web::rt::time::sleep(two_secs)))
-            .expect("failed to sleep-block");
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
 
         assert!(tracker.get_clipboard(hash).is_some());
+
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
+
+        assert!(tracker.get_clipboard(hash).is_none());
     }
 }
