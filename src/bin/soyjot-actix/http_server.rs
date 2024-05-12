@@ -4,14 +4,15 @@ use actix_web::{web, HttpResponse};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use soyjot::store::clipboard::Clipboard;
+use soyjot::store::data::Data;
+use soyjot::store::error::StoreError;
+use soyjot::store::tracker::Tracker;
+
 use crate::resp::http_resp;
-use crate::store::clipboard::Clipboard;
-use crate::store::data::Data;
-use crate::store::error::StoreError;
-use crate::store::tracker::Tracker;
 
 // Load CSS at compile time
-pub const CSS: &str = include_str!("../assets/style.css");
+pub const CSS: &str = include_str!("../../../assets/style.css");
 
 /// `ReqForm` is used to mirror `Clipboard`
 /// so that our HTML form deserialization is straightforward.
@@ -57,8 +58,7 @@ where
     }
 
     if clipboard.is_empty() {
-        return R::from((HttpResponse::BadRequest(), Err(StoreError::Empty)))
-            .post_clipboard("");
+        return R::from((HttpResponse::BadRequest(), Err(StoreError::Empty))).post_clipboard("");
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -90,12 +90,8 @@ where
     let tracker = tracker.into_inner();
 
     match tracker.get_clipboard(&hash) {
-        Some(clipboard) => {
-            R::from((HttpResponse::Ok(), Ok(Some(clipboard)))).send_clipboard(&hash)
-        }
-        None => {
-            R::from((HttpResponse::NotFound(), Err(StoreError::NoSuch))).send_clipboard(&hash)
-        }
+        Some(clipboard) => R::from((HttpResponse::Ok(), Ok(Some(clipboard)))).send_clipboard(&hash),
+        None => R::from((HttpResponse::NotFound(), Err(StoreError::NoSuch))).send_clipboard(&hash),
     }
 }
 

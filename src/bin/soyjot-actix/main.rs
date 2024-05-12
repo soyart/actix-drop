@@ -1,7 +1,5 @@
-mod config; // actix-drop config, not extern crate `config`
 mod http_server;
 mod resp;
-mod store;
 
 #[cfg(unix)] // Our code currently uses UNIX file paths
 #[actix_web::main]
@@ -11,10 +9,11 @@ async fn main() {
     use actix_web::{middleware, web, App, HttpServer};
     use colored::Colorize;
 
-    use crate::config::AppConfig;
     use crate::http_server;
     use crate::resp::http_resp;
-    use crate::store::tracker::Tracker;
+    use soyjot::config::AppConfig;
+    use soyjot::store;
+    use soyjot::store::tracker::Tracker;
 
     let conf = AppConfig::init();
     println!(

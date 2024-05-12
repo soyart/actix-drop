@@ -1,15 +1,13 @@
-pub mod html;
-
 /// http_resp defines HTTP responses used by actix-drop.
 /// Other kind of planned responses are TCP and other protocols.
 pub mod http_resp {
     use actix_web::{HttpResponse, HttpResponseBuilder};
     use serde_json::json;
 
-    use super::html::{self, wrap_html};
-    use crate::store::clipboard::{self, Clipboard};
-    use crate::store::error::{public_error, StoreError};
-    use crate::{para, tag_html};
+    use soyjot::html::{self, wrap_html};
+    use soyjot::store::clipboard::{self, Clipboard};
+    use soyjot::store::error::{public_error, StoreError};
+    use soyjot::{para, tag_html};
 
     /// DropResult represents clipboard or error from http_server
     /// The clipboard is wrapped in `Option` because when posting clipboard,
