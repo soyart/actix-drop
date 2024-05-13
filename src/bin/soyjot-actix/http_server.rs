@@ -9,7 +9,7 @@ use soyjot::store::data::Data;
 use soyjot::store::error::StoreError;
 use soyjot::store::tracker::Tracker;
 
-use crate::resp::http_resp;
+use crate::http_resp;
 
 // Load CSS at compile time
 pub const CSS: &str = include_str!("../../../assets/style.css");
@@ -120,23 +120,23 @@ mod http_server_tests {
     use actix_web::{http::header::ContentType, middleware, test, App};
 
     use super::routes;
-    use crate::resp::http_resp::{ResponseHtml, ResponseJson, ResponseText};
+    use crate::http_resp::*;
 
     #[rustfmt::skip]
-        macro_rules! setup_app {
-            () => {
-                test::init_service(
-                    App::new()
-                        .wrap(middleware::NormalizePath::new(
-                            middleware::TrailingSlash::Trim,
-                        ))
-                        .service(routes::<ResponseHtml>("/app"))
-                        .service(routes::<ResponseJson>("/api"))
-                        .service(routes::<ResponseText>("/txt")),
-                )
-                .await
-            };
-        }
+    macro_rules! setup_app {
+        () => {
+            test::init_service(
+                App::new()
+                    .wrap(middleware::NormalizePath::new(
+                        middleware::TrailingSlash::Trim,
+                    ))
+                    .service(routes::<ResponseHtml>("/app"))
+                    .service(routes::<ResponseJson>("/api"))
+                    .service(routes::<ResponseText>("/txt")),
+            )
+            .await
+        };
+    }
 
     #[actix_web::test]
     async fn test_default_routes() {
