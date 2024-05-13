@@ -53,11 +53,12 @@ where
     };
 
     if let Err(err) = clipboard.is_implemented() {
-        return R::from(Err(err)).post_clipboard(HttpResponse::BadRequest(), "");
+        return R::from((HttpResponse::BadRequest(), Err(err))).post_clipboard("");
     }
 
     if clipboard.is_empty() {
-        return R::from(Err(StoreError::Empty)).post_clipboard(HttpResponse::BadRequest(), "");
+        return R::from((HttpResponse::BadRequest(), Err(StoreError::Empty)))
+            .post_clipboard("");
     }
 
     // hash is hex-coded string of SHA2 hash of clipboard.text.
@@ -65,19 +66,19 @@ where
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
 
-    if let Err(err) = Tracker::store_new_clipboard(
+    match Tracker::store_new_clipboard(
         tracker.into_inner(),
         &hash,
         clipboard,
         Duration::from(**dur),
     ) {
-        eprintln!("error storing clipboard {}: {}", hash, err.to_string());
+        Ok(_) => R::from((HttpResponse::Ok(), Ok(None))).post_clipboard(&hash),
 
-        let resp = R::from(Err(err));
-        return resp.post_clipboard(HttpResponse::InternalServerError(), &hash);
+        Err(err) => {
+            eprintln!("error storing clipboard {}: {}", hash, err.to_string());
+            R::from((HttpResponse::InternalServerError(), Err(err))).post_clipboard(&hash)
+        }
     }
-
-    R::from(Ok(None)).post_clipboard(HttpResponse::Ok(), &hash)
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
@@ -90,10 +91,10 @@ where
 
     match tracker.get_clipboard(&hash) {
         Some(clipboard) => {
-            R::from(Ok(Some(clipboard))).send_clipboard(HttpResponse::Ok(), &hash)
+            R::from((HttpResponse::Ok(), Ok(Some(clipboard)))).send_clipboard(&hash)
         }
         None => {
-            R::from(Err(StoreError::NoSuch)).send_clipboard(HttpResponse::NotFound(), &hash)
+            R::from((HttpResponse::NotFound(), Err(StoreError::NoSuch))).send_clipboard(&hash)
         }
     }
 }
