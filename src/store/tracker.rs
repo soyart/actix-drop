@@ -101,7 +101,7 @@ impl Tracker {
         }
     }
 
-    pub fn remove(&self, hash: &str) -> Option<(Option<Clipboard>, oneshot::Sender<()>)> {
+    fn remove(&self, hash: &str) -> Option<(Option<Clipboard>, oneshot::Sender<()>)> {
         self.haystack
             .lock()
             .expect("failed to lock haystack")

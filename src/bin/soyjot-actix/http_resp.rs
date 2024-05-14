@@ -48,7 +48,6 @@ macro_rules! impl_from_drop_result {
                         $t(result.0, result.1)
                     }
                 }
-
             )*
         }
     }
