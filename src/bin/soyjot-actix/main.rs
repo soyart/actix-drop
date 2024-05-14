@@ -10,7 +10,7 @@ async fn main() {
     use colored::Colorize;
 
     use soyjot::config::AppConfig;
-    use soyjot::store::{self, tracker::Tracker};
+    use soyjot::store::{self, Store};
 
     let conf = AppConfig::init();
     println!(
@@ -43,7 +43,7 @@ async fn main() {
                 conf.timeout.expect("timeout is None"),
             )))
             .app_data(web::Data::new(String::from(http_server::CSS)))
-            .app_data(web::Data::new(Tracker::new()))
+            .app_data(web::Data::new(Store::new()))
             .service(web::resource("/style.css").route(web::get().to(http_server::serve_css)))
             .service(http_server::routes::<http_resp::ResponseHtml>("/app"))
             .service(http_server::routes::<http_resp::ResponseJson>("/api"))

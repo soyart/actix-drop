@@ -2,7 +2,6 @@ pub mod clipboard;
 pub mod data;
 pub mod error;
 pub mod persist;
-pub mod tracker;
 
 use tokio::sync::oneshot;
 
@@ -77,7 +76,7 @@ impl Store {
 
         // Store will remember tx_abort to abort the timer in expire_timer.
         let (tx_abort, rx_abort) = oneshot::channel();
-        tokio::task::spawn(expire_timer(
+        tokio::task::spawn(cleanup(
             store.clone(),
             hash.to_owned(),
             dur.clone(),
@@ -133,12 +132,14 @@ impl Store {
     }
 }
 
-/// expire_timer waits on 2 futures:
+/// Spawns async task with timer to remove clipboard once it expires.
+///
+/// cleanup waits on 2 futures:
 /// 1. the timer
 /// 2. the abort signal
 /// If the timer finishes first, expire_timer removes the entry from `Store.haystack`.
 /// If the abort signal comes first, expire_timer simply returns `Ok(())`.
-async fn expire_timer(
+async fn cleanup(
     store: Arc<Store>,
     hash: String,
     dur: Duration,

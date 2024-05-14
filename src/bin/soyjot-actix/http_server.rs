@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use soyjot::store::clipboard::Clipboard;
 use soyjot::store::data::Data;
 use soyjot::store::error::StoreError;
-use soyjot::store::tracker::Tracker;
+use soyjot::store::Store;
 
 use crate::http_resp;
 
@@ -38,8 +38,8 @@ async fn landing<R: http_resp::DropResponseHttp>() -> HttpResponse {
 /// and save text to file. The text will be hashed, and the first 4 hex-encoded string of the hash
 /// will be used as filename as ID for the clipboard.
 /// When a new clipboard is posted, post_drop sends a message via tx to register the expiry timer.
-async fn post_drop<F, J, R>(
-    tracker: web::Data<Tracker>,
+async fn add_clipboard<F, J, R>(
+    store: web::Data<Store>,
     dur: web::Data<Duration>,
     req: web::Either<web::Form<F>, web::Json<J>>,
 ) -> HttpResponse
@@ -66,12 +66,7 @@ where
     let mut hash = format!("{:x}", Sha256::digest(&clipboard));
     hash.truncate(4);
 
-    match Tracker::store_new_clipboard(
-        tracker.into_inner(),
-        &hash,
-        clipboard,
-        Duration::from(**dur),
-    ) {
+    match Store::store_new_clipboard(store.into_inner(), &hash, clipboard, Duration::from(**dur)) {
         Ok(_) => R::from((HttpResponse::Ok(), Ok(None))).post_clipboard(&hash),
 
         Err(err) => {
@@ -82,14 +77,14 @@ where
 }
 
 /// get_drop retrieves and returns the clipboard based on its hashed ID as per post_drop.
-async fn get_drop<R>(tracker: web::Data<Tracker>, path: web::Path<String>) -> HttpResponse
+async fn get_clipboard<R>(store: web::Data<Store>, path: web::Path<String>) -> HttpResponse
 where
     R: http_resp::DropResponseHttp,
 {
     let hash = path.into_inner();
-    let tracker = tracker.into_inner();
+    let store = store.into_inner();
 
-    match tracker.get_clipboard(&hash) {
+    match store.get_clipboard(&hash) {
         Some(clipboard) => R::from((HttpResponse::Ok(), Ok(Some(clipboard)))).send_clipboard(&hash),
         None => R::from((HttpResponse::NotFound(), Err(StoreError::NoSuch))).send_clipboard(&hash),
     }
@@ -111,8 +106,11 @@ where
     web::scope(prefix)
         .route("", web::get().to(landing::<R>))
         .route("/", web::get().to(landing::<R>))
-        .route("/drop/{id}", web::get().to(get_drop::<R>))
-        .route("/drop", web::post().to(post_drop::<ReqForm, Clipboard, R>))
+        .route("/drop/{id}", web::get().to(get_clipboard::<R>))
+        .route(
+            "/drop",
+            web::post().to(add_clipboard::<ReqForm, Clipboard, R>),
+        )
 }
 
 #[cfg(test)]
