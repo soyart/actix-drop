@@ -218,14 +218,20 @@ mod tests {
     async fn test_store_expire() {
         let store = Arc::new(Store::new());
         let key = "keyfoo";
-        let dur = Duration::from_millis(300);
+        let dur100 = Duration::from_millis(100);
+        let dur200 = Duration::from_millis(200);
+        let dur300 = Duration::from_millis(300);
 
         // Store and launch the expire timer
-        Store::store_new_clipboard(store.clone(), key, Clipboard::Mem("foo".into()), dur).unwrap();
-        // Sleep until expired
-        tokio::spawn(tokio::time::sleep(dur)).await.unwrap();
+        Store::store_new_clipboard(store.clone(), key, Clipboard::Mem("foo".into()), dur300)
+            .expect("failed to store new clipboard");
+
+        // Sleep for less than exp time => should have some after thread wake up
+        tokio::spawn(tokio::time::sleep(dur100)).await.unwrap();
+        assert!(store.get_clipboard(key).is_some());
 
         // Clipboard with `key` should have been expired
+        tokio::spawn(tokio::time::sleep(dur200)).await.unwrap();
         assert!(store.get_clipboard(key).is_none());
     }
 
