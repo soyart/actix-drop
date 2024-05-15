@@ -41,7 +41,7 @@ pub struct ResponseText(HttpResponseBuilder, DropResult);
 pub struct ResponseJson(HttpResponseBuilder, DropResult);
 
 macro_rules! impl_from_drop_result {
-    ( $( $t: ident );+ ) => {
+    ( $( $t: ident ),+ ) => {
             $(
                 impl From<(HttpResponseBuilder, DropResult)> for $t {
                     fn from(result: (HttpResponseBuilder, DropResult)) -> $t {
@@ -53,7 +53,7 @@ macro_rules! impl_from_drop_result {
     }
 
 // Impl From<DropResult> for ResponseHtml, ResponsePlain, ResponseJson
-impl_from_drop_result!(ResponseHtml; ResponseText; ResponseJson);
+impl_from_drop_result!(ResponseHtml, ResponseText, ResponseJson);
 
 impl DropResponseHttp for ResponseHtml {
     const CONTENT_TYPE: &'static str = "text/html";
