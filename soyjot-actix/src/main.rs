@@ -9,8 +9,8 @@ async fn main() {
     use actix_web::{middleware, web, App, HttpServer};
     use colored::Colorize;
 
-    use soyjot::config::AppConfig;
-    use soyjot::store::{self, Store};
+    use libsoyjot::config::AppConfig;
+    use libsoyjot::store::{self, Store};
 
     let conf = AppConfig::init();
     println!(
