@@ -4,15 +4,15 @@ use actix_web::{web, HttpResponse};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use soyjot::store::clipboard::Clipboard;
-use soyjot::store::data::Data;
-use soyjot::store::error::StoreError;
-use soyjot::store::Store;
+use libsoyjot::store::clipboard::Clipboard;
+use libsoyjot::store::data::Data;
+use libsoyjot::store::error::StoreError;
+use libsoyjot::store::Store;
 
 use crate::http_resp;
 
 // Load CSS at compile time
-pub const CSS: &str = include_str!("../../../assets/style.css");
+pub const CSS: &str = include_str!("../../assets/style.css");
 
 /// `ReqForm` is used to mirror `Clipboard`
 /// so that our HTML form deserialization is straightforward.

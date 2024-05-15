@@ -1,10 +1,10 @@
 use actix_web::{HttpResponse, HttpResponseBuilder};
 use serde_json::json;
 
-use soyjot::html::{self, wrap_html};
-use soyjot::store::clipboard::{self, Clipboard};
-use soyjot::store::error::{public_error, StoreError};
-use soyjot::{para, tag_html};
+use libsoyjot::html::{self, wrap_html};
+use libsoyjot::store::clipboard::{self, Clipboard};
+use libsoyjot::store::error::{public_error, StoreError};
+use libsoyjot::{para, tag_html};
 
 /// DropResult represents clipboard or error from http_server
 /// The clipboard is wrapped in `Option` because when posting clipboard,
