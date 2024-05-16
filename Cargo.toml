@@ -1,2 +1,21 @@
 [workspace]
-members = ["libsoyjot", "soyjot-actix", "soyjot-axum"]
+members = ["soyjot", "soyjot-actix", "soyjot-axum"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace.package]
+description = "Text and data sharing app"
+edition = "2021"
+authors = ["Prem Phansuriyanon"]
+readme = "README.md"
+license = "BSD-3-Clause OR GPL-2.0"
+repository = "https://github.com/soyart/soyjot"
+
+[workspace.dependencies]
+tokio = { version = "^1", features = ["macros", "time", "rt-multi-thread"] }
+serde = { version = "^1", features = ["derive"] }
+serde_json = "^1"
+thiserror = "^1"
+sha2 = ">=0.10"
+colored = "^2"
+config = ">=0.14"

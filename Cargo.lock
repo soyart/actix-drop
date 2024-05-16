@@ -715,18 +715,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae743338b92ff9146ce83992f766a31066a91a8c84a45e0e9f21e7cf6de6d346"
 
 [[package]]
-name = "libsoyjot"
-version = "0.1.0"
-dependencies = [
- "colored",
- "config",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1221,16 +1209,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "soyjot"
+version = "0.1.0"
+dependencies = [
+ "colored",
+ "config",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "soyjot-actix"
 version = "0.1.0"
 dependencies = [
- "actix-router",
  "actix-web",
  "colored",
- "libsoyjot",
  "serde",
  "serde_json",
  "sha2",
+ "soyjot",
+ "tokio",
 ]
 
 [[package]]

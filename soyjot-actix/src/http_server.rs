@@ -4,10 +4,10 @@ use actix_web::{web, HttpResponse};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use libsoyjot::store::clipboard::Clipboard;
-use libsoyjot::store::data::Data;
-use libsoyjot::store::error::StoreError;
-use libsoyjot::store::Store;
+use soyjot::store::clipboard::Clipboard;
+use soyjot::store::data::Data;
+use soyjot::store::error::StoreError;
+use soyjot::store::Store;
 
 use crate::http_resp;
 
