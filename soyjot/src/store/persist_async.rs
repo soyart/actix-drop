@@ -14,18 +14,16 @@ pub async fn assert_dir(conf_dir: Option<String>) {
         _ => DIR.to_string(),
     };
 
-    match dir_exists(&dir).await {
-        Ok(false) => {
-            create_dir(&dir).await;
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            create_dir(&dir).await;
-        }
+    let result = match dir_exists(&dir).await {
+        Ok(false) => create_dir(&dir).await,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => create_dir(&dir).await,
         Err(err) => {
             panic!("bad directory: {}", err.to_string());
         }
-        _ => {}
-    }
+        _ => Ok(()),
+    };
+
+    result.expect("failed to create store directory '{dir}'");
 }
 
 async fn create_dir<S>(dir: S) -> Result<(), StoreError>
