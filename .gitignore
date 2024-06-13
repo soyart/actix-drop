@@ -1,3 +1,4 @@
 /target
 /drop
 /.rustfmt.toml
+.DS_Store

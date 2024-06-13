@@ -2,6 +2,7 @@ pub mod clipboard;
 pub mod data;
 pub mod error;
 pub mod persist;
+pub mod persist_async;
 
 use tokio::sync::oneshot;
 
@@ -70,6 +71,55 @@ impl Store {
             // Clipboard::Persist(data) => data does not have to live in haystack
             Clipboard::Persist(data) => {
                 persist::write_clipboard_file(hash, data.as_ref())?;
+                Storage::Persistent
+            }
+        };
+
+        // Store will remember tx_abort to abort the timer in expire_timer.
+        let (tx_abort, rx_abort) = oneshot::channel();
+        tokio::task::spawn(cleanup(
+            store.clone(),
+            hash.to_owned(),
+            dur.clone(),
+            rx_abort,
+        ));
+
+        store
+            .haystack
+            .lock()
+            .expect("failed to lock haystack")
+            .insert(
+                hash.to_owned(),
+                Entry {
+                    storage: to_save,
+                    abort_tx: tx_abort,
+                },
+            );
+
+        Ok(())
+    }
+
+    pub async fn store_new_clipboard_async(
+        store: Arc<Self>,
+        hash: &str,
+        clipboard: Clipboard,
+        dur: Duration,
+    ) -> Result<(), StoreError> {
+        // Drop the old timer for the hash key
+        if let Some(entry) = store.remove_entry(&hash) {
+            // Recevier might have been dropped
+            if let Err(_) = entry.abort_tx.send(()) {
+                eprintln!("store_new_clipboard: failed to remove old timer for {hash}");
+            }
+        }
+
+        let to_save = match clipboard.clone() {
+            // Clipboard::Mem(data) => data will have to live in haystack
+            clip @ Clipboard::Mem(_) => Storage::Memory(clip),
+
+            // Clipboard::Persist(data) => data does not have to live in haystack
+            Clipboard::Persist(data) => {
+                persist_async::write_clipboard_file(hash, data.as_ref()).await?;
                 Storage::Persistent
             }
         };
